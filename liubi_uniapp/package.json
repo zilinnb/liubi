@@ -1,0 +1,13 @@
+{
+	"name": "liubi",
+	"version": "1.0.0",
+	"description": "留笔 - 标记我的生活",
+	"main": "main.js",
+	"scripts": {},
+	"dependencies": {
+		"pinia": "^2.1.7"
+	},
+	"devDependencies": {
+		"sass": "^1.69.5"
+	}
+}

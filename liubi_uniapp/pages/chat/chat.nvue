@@ -1,0 +1,729 @@
+<template>
+	<view class="page-chat">
+		<!-- 导航栏 -->
+		<view class="top-nav" :style="{ paddingTop: statusBarH + 'px' }">
+			<view class="nav-inner">
+				<view class="nav-left" @tap="goBack">
+					<image class="back-icon" src="/static/icons/back.png" mode="aspectFit" />
+				</view>
+				<view class="nav-center" @tap="onNavTap">
+					<text class="nav-title">{{ convName }}</text>
+					<text v-if="convType === 2 && memberCount > 0" class="nav-sub">({{ memberCount }})</text>
+				</view>
+				<view class="nav-right">
+					<view v-if="convType === 2" class="nav-more" @tap="onNavTap">
+						<text class="more-dots">···</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<!-- 消息列表 -->
+		<scroll-view
+			scroll-y
+			class="chat-scroll"
+			:show-scrollbar="false"
+			@tap="dismissKeyboard"
+			@scroll="onScroll"
+		>
+			<view v-if="msgs.length" class="msg-time-divider">
+				<text class="time-divider-text">{{ fmtDate(msgs[0].created_at) }}</text>
+			</view>
+			<view v-for="(m, idx) in msgs" :key="m.id" :ref="'msg' + idx">
+				<view v-if="idx > 0 && shouldShowTime(msgs[idx-1].created_at, m.created_at)" class="msg-time-divider">
+					<text class="time-divider-text">{{ fmtTimeDivider(m.created_at) }}</text>
+				</view>
+
+				<!-- 撤回消息提示 -->
+				<view v-if="m.is_recalled" class="msg-row msg-recalled" @tap.stop="onRecalledTap(m)">
+					<text class="recalled-text">{{ m.sender_id === myId ? '你撤回了一条消息' : (m.sender_name || '对方') + '撤回了一条消息' }}</text>
+					<text v-if="m.sender_id === myId" class="recalled-edit">重新编辑</text>
+				</view>
+
+				<!-- 系统消息 -->
+				<view v-else-if="m.type === 3" class="msg-row msg-system">
+					<text class="system-text">{{ m.content }}</text>
+				</view>
+
+				<!-- 正常消息 -->
+				<view v-else>
+				<!-- 别人消息 -->
+				<view v-if="m.sender_id !== myId" class="msg-row msg-other">
+					<image v-if="m.sender_avatar" class="msg-av" :src="fullUrl(m.sender_avatar)" mode="aspectFill" resize="cover" @tap="goToProfile(m.sender_id)" />
+					<view v-else class="msg-av" :style="{ backgroundColor: avColor(m.sender_id) }" @tap="goToProfile(m.sender_id)">
+						<text class="av-letter">{{ (m.sender_name||'?').slice(0,1) }}</text>
+					</view>
+					<view class="bubble-wrap">
+						<text v-if="convType === 2" class="bubble-sender">{{ m.sender_name }}</text>
+						<view v-if="m.type === 1" class="bubble bubble-other" @longpress="onBubbleLongPress(m, $event)">
+							<text class="bubble-text">{{ m.content }}</text>
+						</view>
+						<view v-else-if="m.type === 2" class="bubble bubble-img-wrap" @tap="previewImg(m.content)" @longpress="onBubbleLongPress(m, $event)">
+							<image class="bubble-image" :src="fullUrl(m.content)" mode="widthFix" />
+						</view>
+					</view>
+				</view>
+
+				<!-- 自己消息 -->
+				<view v-else class="msg-row msg-self">
+					<view class="self-spacer"></view>
+					<view class="bubble-wrap self-bubble-wrap">
+						<view v-if="m.type === 1" class="bubble bubble-self" @longpress="onBubbleLongPress(m, $event)">
+							<text class="bubble-text bubble-text-self">{{ m.content }}</text>
+						</view>
+						<view v-else-if="m.type === 2" class="bubble bubble-img-wrap" @tap="previewImg(m.content)" @longpress="onBubbleLongPress(m, $event)">
+							<image class="bubble-image" :src="fullUrl(m.content)" mode="widthFix" />
+						</view>
+					</view>
+					<image v-if="myAvatar" class="msg-av" :src="fullUrl(myAvatar)" mode="aspectFill" resize="cover" />
+					<view v-else class="msg-av msg-av-self">
+						<text class="av-letter">我</text>
+					</view>
+				</view>
+				</view>
+			</view>
+			<view ref="scrollBottom" style="height: 1px;"></view>
+			<view style="height: 12px;"></view>
+		</scroll-view>
+
+		<!-- 输入栏 - 微信风格 -->
+		<view class="input-bar" :style="{ paddingBottom: (safeBottom + keyboardH) + 'px' }">
+			<view class="input-row">
+				<view class="input-wrap">
+					<textarea
+						class="chat-input"
+						v-model="text"
+						placeholder="输入消息..."
+						:auto-height="true"
+						:maxlength="-1"
+						:focus="inputFocused"
+						@input="onInput"
+						@focus="onInputFocus"
+						@blur="onInputBlur"
+						:adjust-position="false"
+					/>
+				</view>
+				<!-- 无输入时显示+号按钮（图片选择），有输入时显示发送按钮 -->
+				<view v-if="!text.trim()" class="plus-btn" @tap="pickImage">
+					<image class="plus-btn-icon" src="/static/icons/images.png" mode="aspectFit" />
+				</view>
+				<view v-else class="send-btn send-active" @tap="onSend">
+					<text class="send-text send-text-active">发送</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- 长按菜单 -->
+		<view v-if="showActionMenu" class="action-mask" @tap="showActionMenu = false">
+			<view class="action-box" :style="{ top: menuY + 'px', left: menuX + 'px' }">
+				<view class="action-row">
+					<view class="action-item" @tap="doCopy">
+						<text class="action-label">复制</text>
+					</view>
+					<view class="action-item" @tap="doSelectAll">
+						<text class="action-label">全选</text>
+					</view>
+					<view v-if="actionMsg && actionMsg.sender_id === myId && canRecall(actionMsg)" class="action-item" @tap="doRecall">
+						<text class="action-label">撤回</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<!-- 群聊成员弹窗 -->
+		<view v-if="showGroupModal" class="modal-mask" @tap="showGroupModal = false">
+			<view class="modal-box" @tap.stop="">
+				<view class="modal-header">
+					<text class="modal-title">{{ convName }}</text>
+					<view class="modal-close" @tap="showGroupModal = false">
+						<text class="modal-close-text">✕</text>
+					</view>
+				</view>
+				<text class="modal-sub">群成员 ({{ groupMembers.length }}人)</text>
+				<view v-if="groupCode" class="modal-group-code">
+					<text class="modal-code-label">群聊号</text>
+					<text class="modal-code-value">{{ groupCode }}</text>
+				</view>
+				<scroll-view scroll-y class="modal-scroll">
+					<view class="modal-member" v-for="m in groupMembers" :key="m.id">
+						<image v-if="m.avatar" class="modal-av" :src="fullUrl(m.avatar)" mode="aspectFill" resize="cover" />
+						<view v-else class="modal-av" :style="{ backgroundColor: avColor(m.id) }">
+							<text class="av-letter">{{ (m.nickname||'?').slice(0,1) }}</text>
+						</view>
+						<text class="modal-name">{{ m.nickname || '用户' }}</text>
+						<view v-if="m.id !== myId && canKick(m)" class="modal-kick-btn" @tap="kickMember(m.id)">
+							<text class="modal-kick-text">移出</text>
+						</view>
+					</view>
+				</scroll-view>
+				<view v-if="!isGroupOwner" class="modal-leave-btn" @tap="leaveGroup">
+					<text class="modal-leave-text">退出群聊</text>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script>
+import { request, uploadFile, BASE_URL } from '@/utils/request.js'
+
+const dom = weex.requireModule('dom')
+const clipboard = weex.requireModule('clipboard')
+
+export default {
+	data() {
+		return {
+			statusBarH: 20,
+			safeBottom: 0,
+			keyboardH: 0,
+			convId: null,
+			convName: '',
+			convType: 1,
+			groupCode: '',
+			msgs: [],
+			text: '',
+			myId: 0,
+			myAvatar: '',
+			memberCount: 0,
+			groupMembers: [],
+			showGroupModal: false,
+			isGroupOwner: false,
+			myRole: 0,
+			sending: false,
+			inputFocused: false,
+			// 长按菜单
+			showActionMenu: false,
+			actionMsg: null,
+			menuX: 100,
+			menuY: 200,
+			COLORS: ['#ff2442','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2']
+		}
+	},
+	onLoad(o) {
+		const sys = uni.getSystemInfoSync()
+		this.statusBarH = sys.statusBarHeight || 20
+		this.safeBottom = sys.safeAreaInsets ? sys.safeAreaInsets.bottom : 0
+
+		this._kbHandler = (res) => {
+			this.keyboardH = res.height
+			if (res.height > 0) {
+				setTimeout(() => { this.scrollToBottom(false) }, 250)
+			}
+		}
+		uni.onKeyboardHeightChange(this._kbHandler)
+
+		try {
+			const raw = uni.getStorageSync('userInfo')
+			if (raw) {
+				const info = JSON.parse(raw)
+				this.myId = info.id || 0
+				this.myAvatar = info.avatar || ''
+			}
+		} catch (e) {}
+
+		this.convId = o.conversationId
+		if (o.userId) {
+			this.createPrivate(Number(o.userId))
+		} else {
+			this.initChat()
+		}
+	},
+	onBackPress() {
+		if (this.showActionMenu) { this.showActionMenu = false; return true }
+		uni.hideKeyboard()
+		return false
+	},
+	onUnload() {
+			if (this._kbHandler) {
+				uni.offKeyboardHeightChange(this._kbHandler)
+				this._kbHandler = null
+			}
+			this.keyboardH = 0
+			this.inputFocused = false
+	},
+	methods: {
+		async initChat() {
+			uni.showLoading({ title: '加载中...' })
+			try {
+				await Promise.all([this.loadMessages(), this.loadConvInfo()])
+			} catch (e) {
+				console.error('加载失败:', e)
+			} finally {
+				uni.hideLoading()
+			}
+			this.scrollAfterRender()
+		},
+
+		scrollAfterRender() {
+			this.$nextTick(() => {
+				setTimeout(() => {
+					this.scrollToBottom(true)
+				}, 50)
+			})
+		},
+
+		scrollToBottom(animated = true) {
+			if (!this.msgs.length) return
+			this.$nextTick(() => {
+				setTimeout(() => {
+					try {
+						if (this.$refs.scrollBottom) {
+							dom.scrollToElement(this.$refs.scrollBottom, { offset: 0, animated })
+							return
+						}
+					} catch (e) {}
+					try {
+						const lastIdx = this.msgs.length - 1
+						const el = this.$refs['msg' + lastIdx]
+						if (el && el[0]) {
+							dom.scrollToElement(el[0], { offset: 0, animated })
+						}
+					} catch (e) {}
+				}, 30)
+			})
+		},
+
+		avColor(id) { return this.COLORS[id % this.COLORS.length] },
+		fullUrl(url) {
+			if (!url) return ''
+			if (url.startsWith('http')) return url
+			return BASE_URL.replace('/api', '') + url
+		},
+		previewImg(url) {
+			uni.previewImage({ urls: [this.fullUrl(url)] })
+		},
+		shouldShowTime(prev, curr) {
+			if (!prev || !curr) return false
+			return (new Date(curr).getTime() - new Date(prev).getTime()) > 300000
+		},
+		fmtDate(d) {
+			if (!d) return ''
+			const date = new Date(d), now = new Date()
+			const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+			const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+			if (msgDate.getTime() === today.getTime()) return '今天'
+			if (msgDate.getTime() === today.getTime() - 86400000) return '昨天'
+			return (date.getMonth()+1) + '月' + date.getDate() + '日'
+		},
+		fmtTimeDivider(d) {
+			if (!d) return ''
+			const date = new Date(d)
+			return this.fmtDate(d) + ' ' + date.getHours().toString().padStart(2,'0') + ':' + date.getMinutes().toString().padStart(2,'0')
+		},
+
+		async createPrivate(userId) {
+			uni.showLoading({ title: '' })
+			const res = await request({ url: '/chat/conversation/private', method: 'POST', data: { user_id: userId } })
+			uni.hideLoading()
+			if (res.code === 200) {
+				this.convId = res.data.conversationId || res.data.id
+				this.convName = res.data.name || '私聊'
+			}
+			await this.loadMessages()
+			await this.loadConvInfo()
+			this.scrollAfterRender()
+		},
+
+		async loadConvInfo() {
+			if (!this.convId) return
+			try {
+				const res = await request({ url: '/chat/conversations' })
+				if (res.code === 200) {
+					const c = res.data.find(c => c.id === Number(this.convId))
+					if (c) {
+						this.convName = c.type === 2 ? (c.name || '群聊') : (c.name || '私聊')
+						this.convType = c.type
+						this.groupCode = c.group_code || ''
+						if (c.type === 2 && c.member_count) this.memberCount = c.member_count
+						if (c.type === 2) {
+							this.isGroupOwner = c.created_by === this.myId
+						}
+					}
+				}
+			} catch (e) {}
+		},
+
+		async loadMessages() {
+			if (!this.convId) return
+			const res = await request({ url: '/chat/messages/' + this.convId })
+			if (res.code === 200) {
+				this.msgs = res.data
+			}
+			if (!this.convName) await this.loadConvInfo()
+		},
+
+		async loadGroupMembers() {
+			if (!this.convId) return
+			try {
+				const res = await request({ url: '/chat/conversation/' + this.convId + '/members' })
+				if (res.code === 200) {
+					this.groupMembers = res.data
+					this.memberCount = res.data.length
+				}
+			} catch (e) {}
+		},
+
+		canKick(member) {
+			if (member.id === this.myId) return false
+			if (this.isGroupOwner) return true
+			if (this.myRole === 1) return true
+			return false
+		},
+
+		async leaveGroup() {
+			uni.showModal({
+				title: '确认退出',
+				content: '退出后将无法收到该群聊的消息',
+				confirmColor: '#ff2442',
+				success: async (r) => {
+					if (r.confirm) {
+						uni.showLoading({ title: '退出中...' })
+						try {
+							const res = await request({
+								url: '/chat/conversation/leave',
+								method: 'POST',
+								data: { conversation_id: this.convId }
+							})
+							uni.hideLoading()
+							if (res.code === 200) {
+								this.showGroupModal = false
+								uni.showToast({ title: '已退出群聊', icon: 'success' })
+								setTimeout(() => { uni.navigateBack() }, 1000)
+							} else {
+								uni.showToast({ title: res.msg || '退出失败', icon: 'none' })
+							}
+						} catch (e) {
+							uni.hideLoading()
+							uni.showToast({ title: '网络错误', icon: 'none' })
+						}
+					}
+				}
+			})
+		},
+
+		async kickMember(userId) {
+			uni.showModal({
+				title: '确认移出',
+				content: '确定将该成员移出群聊吗？',
+				confirmColor: '#ff2442',
+				success: async (r) => {
+					if (r.confirm) {
+						uni.showLoading({ title: '操作中...' })
+						try {
+							const res = await request({
+								url: '/chat/conversation/kick',
+								method: 'POST',
+								data: { conversation_id: this.convId, user_id: userId }
+							})
+							uni.hideLoading()
+							if (res.code === 200) {
+								this.groupMembers = this.groupMembers.filter(m => m.id !== userId)
+								this.memberCount = this.groupMembers.length
+								uni.showToast({ title: '已移出群聊', icon: 'success' })
+							} else {
+								uni.showToast({ title: res.msg || '操作失败', icon: 'none' })
+							}
+						} catch (e) {
+							uni.hideLoading()
+							uni.showToast({ title: '网络错误', icon: 'none' })
+						}
+					}
+				}
+			})
+		},
+
+		onNavTap() {
+			if (this.convType !== 2) return
+			uni.hideKeyboard()
+			this.loadGroupMembers()
+			this.showGroupModal = true
+		},
+
+		onInput(e) {
+			// textarea 输入处理
+		},
+			onInputFocus() {
+				if (!this.keyboardH) {
+					try {
+						const h = plus.navigator.getKeyboardHeight()
+						if (h > 0) this.keyboardH = h
+					} catch(e) {}
+				}
+				setTimeout(() => { this.scrollToBottom(true) }, 250)
+			},
+		onInputBlur() { this.keyboardH = 0 },
+
+		async onSend() {
+			if (!this.text.trim() || this.sending) return
+			this.sending = true
+			const content = this.text.trim()
+			this.text = ''
+
+			const localMsg = {
+				id: 'local_' + Date.now(),
+				sender_id: this.myId,
+				content: content,
+				type: 1,
+				is_recalled: 0,
+				created_at: new Date().toISOString(),
+				sender_name: '',
+				sender_avatar: this.myAvatar
+			}
+			this.msgs.push(localMsg)
+			
+			// 立即滚动到底部，带平滑动画
+			this.$nextTick(() => {
+				setTimeout(() => {
+					this.scrollToBottom(true)
+				}, 10)
+			})
+
+			try {
+				const res = await request({
+					url: '/chat/messages',
+					method: 'POST',
+					data: { conversation_id: Number(this.convId), content: content, type: 1 }
+				})
+				if (res.code === 200) {
+					await this.loadMessages()
+				} else {
+					const idx = this.msgs.findIndex(m => m.id === localMsg.id)
+					if (idx >= 0) this.msgs.splice(idx, 1)
+					uni.showToast({ title: '发送失败', icon: 'none' })
+				}
+			} catch (e) {
+				const idx = this.msgs.findIndex(m => m.id === localMsg.id)
+				if (idx >= 0) this.msgs.splice(idx, 1)
+				uni.showToast({ title: '发送失败', icon: 'none' })
+			}
+			this.sending = false
+		},
+
+		pickImage() {
+			uni.hideKeyboard()
+			uni.chooseImage({
+				count: 1,
+				sizeType: ['compressed'],
+				sourceType: ['album', 'camera'],
+				success: async (res) => {
+					await this.sendImage(res.tempFilePaths[0])
+				}
+			})
+		},
+
+		async sendImage(path) {
+			const localMsg = {
+				id: 'local_img_' + Date.now(),
+				sender_id: this.myId,
+				content: path,
+				type: 2,
+				is_recalled: 0,
+				created_at: new Date().toISOString(),
+				sender_name: '',
+				sender_avatar: this.myAvatar
+			}
+			this.msgs.push(localMsg)
+			this.scrollToBottom(true)
+
+			uni.showLoading({ title: '发送中...' })
+			try {
+				const upRes = await uploadFile('/upload/single', path)
+				if (upRes.code === 200 && upRes.data && upRes.data.url) {
+					const res = await request({
+						url: '/chat/messages',
+						method: 'POST',
+						data: { conversation_id: Number(this.convId), content: upRes.data.url, type: 2 }
+					})
+					if (res.code === 200) {
+						await this.loadMessages()
+					}
+				} else {
+					uni.showToast({ title: '上传失败', icon: 'none' })
+				}
+			} catch (e) {
+				uni.showToast({ title: '发送失败', icon: 'none' })
+			}
+			uni.hideLoading()
+		},
+
+		// 长按菜单
+		onBubbleLongPress(m, e) {
+			this.actionMsg = m
+			// 菜单显示在消息气泡上方
+			const screenW = 375
+			this.menuX = m.sender_id === this.myId ? (screenW - 220) : 20
+			if (e && e.touches && e.touches[0]) {
+				this.menuY = e.touches[0].screenY - 60
+			} else {
+				this.menuY = 200
+			}
+			if (this.menuY < 80) this.menuY = 80
+			this.showActionMenu = true
+		},
+
+		canRecall(m) {
+			if (!m || !m.created_at) return false
+			if (String(m.id).startsWith('local_')) return true
+			return (Date.now() - new Date(m.created_at).getTime()) < 120000
+		},
+
+		doCopy() {
+			this.showActionMenu = false
+			if (!this.actionMsg || this.actionMsg.type !== 1) return
+			const content = this.actionMsg.content
+			uni.setClipboardData({
+				data: content,
+				success: () => { uni.showToast({ title: '已复制', icon: 'none' }) }
+			})
+		},
+
+		doSelectAll() {
+			this.showActionMenu = false
+			if (!this.actionMsg || this.actionMsg.type !== 1) return
+			const content = this.actionMsg.content
+			uni.setClipboardData({
+				data: content,
+				success: () => { uni.showToast({ title: '已全选并复制', icon: 'none' }) }
+			})
+		},
+
+		async doRecall() {
+			this.showActionMenu = false
+			if (!this.actionMsg) return
+			const m = this.actionMsg
+			// 本地消息直接标记撤回
+			if (String(m.id).startsWith('local_')) {
+				const idx = this.msgs.findIndex(item => item.id === m.id)
+				if (idx >= 0) this.msgs[idx].is_recalled = 1
+				return
+			}
+			// 服务器撤回
+			const res = await request({ url: '/chat/messages/' + m.id, method: 'DELETE' })
+			if (res.code === 200) {
+				const idx = this.msgs.findIndex(item => item.id === m.id)
+				if (idx >= 0) this.msgs[idx].is_recalled = 1
+				uni.showToast({ title: '已撤回', icon: 'none' })
+			} else {
+				uni.showToast({ title: res.msg || '撤回失败', icon: 'none' })
+			}
+		},
+
+		onRecalledTap(m) {
+			// 自己撤回的消息，点击重新编辑
+			if (m.sender_id === this.myId && m.content) {
+				this.text = m.content
+				this.inputFocused = true
+			}
+		},
+
+		onScroll(e) {
+			// 不再在滚动时收起键盘，避免与键盘弹出冲突
+		},
+
+		dismissKeyboard() {
+			uni.hideKeyboard()
+		this.keyboardH = 0
+			this.showActionMenu = false
+		},
+		goBack() {
+			uni.hideKeyboard()
+			setTimeout(() => { uni.navigateBack() }, 100)
+		},
+		goToProfile(userId) {
+			if (!userId) return
+			uni.navigateTo({ url: '/pages/user-profile/user-profile?userId=' + userId })
+		}
+	}
+}
+</script>
+
+<style>
+.page-chat { flex: 1; background-color: #ebebeb; flex-direction: column; }
+
+/* 导航栏 */
+.top-nav { background-color: #ededed; border-bottom-width: 0.5px; border-bottom-color: #d9d9d9; }
+.nav-inner { height: 44px; flex-direction: row; align-items: center; justify-content: space-between; padding-left: 4px; padding-right: 4px; }
+.nav-left { width: 44px; height: 44px; align-items: center; justify-content: center; }
+.back-icon { width: 24px; height: 24px; }
+.nav-center { flex: 1; flex-direction: row; align-items: baseline; justify-content: center; }
+.nav-title { font-size: 17px; font-weight: 700; color: #222; }
+.nav-sub { font-size: 13px; color: #999; margin-left: 2px; }
+.nav-right { width: 44px; height: 44px; align-items: center; justify-content: center; }
+.nav-more { width: 44px; height: 44px; align-items: center; justify-content: center; }
+.more-dots { font-size: 22px; color: #333; letter-spacing: 1px; }
+
+/* 消息列表 */
+.chat-scroll { flex: 1; background-color: #ebebeb; }
+.msg-time-divider { align-items: center; padding-top: 10px; padding-bottom: 4px; }
+.time-divider-text { font-size: 12px; color: #999; background-color: rgba(0,0,0,0.04); padding-top: 2px; padding-bottom: 2px; padding-left: 10px; padding-right: 10px; border-radius: 4px; }
+
+.msg-row { flex-direction: row; align-items: flex-start; padding-top: 4px; padding-bottom: 4px; padding-left: 12px; padding-right: 12px; }
+.msg-other { justify-content: flex-start; }
+.msg-self { justify-content: flex-end; }
+.msg-recalled { flex-direction: row; align-items: center; justify-content: center; padding-top: 6px; padding-bottom: 6px; }
+.recalled-text { font-size: 12px; color: #999; }
+.recalled-edit { font-size: 12px; color: #576b95; margin-left: 4px; }
+
+.msg-system { flex-direction: row; align-items: center; justify-content: center; padding-top: 8px; padding-bottom: 8px; }
+.system-text { font-size: 12px; color: #999; background-color: #f5f5f5; border-radius: 4px; padding-top: 4px; padding-bottom: 4px; padding-left: 12px; padding-right: 12px; }
+
+.msg-av { width: 40px; height: 40px; border-radius: 20px; flex-shrink: 0; align-items: center; justify-content: center; background-color: #e8e8e8; }
+.msg-av-self { background-color: #ff2442; align-items: center; justify-content: center; }
+.av-letter { font-size: 14px; color: #fff; font-weight: 700; }
+.msg-other .msg-av { margin-right: 8px; }
+.msg-self .msg-av { margin-left: 8px; }
+
+.self-spacer { flex: 1; }
+
+.bubble-wrap { max-width: 260px; }
+.self-bubble-wrap { flex-shrink: 1; }
+.bubble-sender { font-size: 11px; color: #576b95; margin-bottom: 2px; }
+.bubble { border-radius: 4px; padding-top: 10px; padding-bottom: 10px; padding-left: 12px; padding-right: 12px; position: relative; }
+.bubble-other { background-color: #ffffff; }
+.bubble-self { background-color: #95ec69; }
+.bubble-textarea { font-size: 16px; color: #333; line-height: 22px; background-color: transparent; }
+.bubble-textarea-self { color: #222; }
+.bubble-img-wrap { background-color: transparent; padding: 2px; border-radius: 4px; }
+.bubble-image { width: 200px; border-radius: 4px; }
+
+/* 输入栏 - 微信风格 */
+.input-bar { background-color: #f7f7f7; border-top-width: 0.5px; border-top-color: #d9d9d9; }
+.input-row { flex-direction: row; align-items: flex-end; padding-top: 8px; padding-bottom: 8px; padding-left: 10px; padding-right: 10px; }
+.input-wrap { flex: 1; background-color: #ffffff; border-radius: 4px; padding-top: 8px; padding-bottom: 8px; padding-left: 10px; padding-right: 10px; min-height: 36px; max-height: 100px; border-width: 0.5px; border-color: #dddddd; justify-content: center; }
+.chat-input { font-size: 16px; min-height: 20px; max-height: 80px; line-height: 20px; }
+/* 无输入时的+号按钮 */
+.plus-btn { width: 36px; height: 36px; align-items: center; justify-content: center; margin-left: 8px; background-color: #ffffff; border-radius: 4px; border-width: 0.5px; border-color: #dddddd; }
+.plus-btn-icon { width: 22px; height: 22px; }
+/* 发送按钮 - 只在有输入时显示 */
+.send-btn { height: 36px; border-radius: 4px; align-items: center; justify-content: center; padding-left: 14px; padding-right: 14px; margin-left: 8px; }
+.send-active { background-color: #07c160; }
+.send-text { font-size: 15px; font-weight: 600; }
+.send-text-active { color: #ffffff; }
+
+/* 长按菜单 */
+.action-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 999; }
+.action-box { position: fixed; width: 240px; background-color: rgba(60, 60, 60, 0.95); border-radius: 6px; padding-top: 8px; padding-bottom: 8px; }
+.action-row { flex-direction: row; align-items: center; justify-content: space-around; }
+.action-item { flex-direction: column; align-items: center; justify-content: center; flex: 1; padding-top: 8px; padding-bottom: 8px; }
+.action-label { font-size: 13px; color: #ffffff; }
+
+/* 弹窗 */
+.modal-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+.modal-box { width: 300px; max-height: 400px; background-color: #fff; border-radius: 12px; }
+.modal-header { flex-direction: row; align-items: center; justify-content: space-between; padding-top: 16px; padding-bottom: 12px; padding-left: 16px; padding-right: 16px; border-bottom-width: 1px; border-bottom-color: #f0f0f0; }
+.modal-title { font-size: 17px; font-weight: 700; color: #222; }
+.modal-close { width: 28px; height: 28px; align-items: center; justify-content: center; }
+.modal-close-text { font-size: 16px; color: #999; }
+.modal-sub { font-size: 13px; color: #999; padding-top: 12px; padding-bottom: 6px; padding-left: 16px; padding-right: 16px; }
+.modal-group-code { flex-direction: row; align-items: center; padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-right: 16px; border-bottom-width: 1px; border-bottom-color: #f0f0f0; }
+.modal-code-label { font-size: 13px; color: #999; margin-right: 8px; }
+.modal-code-value { font-size: 14px; color: #ff2442; font-weight: 700; }
+.modal-scroll { height: 280px; padding-left: 16px; padding-right: 16px; padding-bottom: 16px; }
+.modal-member { flex-direction: row; align-items: center; padding-top: 8px; padding-bottom: 8px; border-bottom-width: 1px; border-bottom-color: #f8f8f8; }
+.modal-av { width: 36px; height: 36px; border-radius: 18px; margin-right: 10px; align-items: center; justify-content: center; }
+.modal-name { font-size: 15px; color: #333; }
+.modal-kick-btn { margin-left: auto; padding-top: 4px; padding-bottom: 4px; padding-left: 12px; padding-right: 12px; border-radius: 4px; background-color: #fff0f0; }
+.modal-kick-text { font-size: 12px; color: #ff2442; }
+.modal-leave-btn { margin-top: 8px; margin-bottom: 16px; margin-left: 16px; margin-right: 16px; padding-top: 12px; padding-bottom: 12px; border-radius: 8px; background-color: #fff0f0; align-items: center; justify-content: center; }
+.modal-leave-text { font-size: 15px; color: #ff2442; font-weight: 600; }
+</style>
