@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.5-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.0.6-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">留笔 Liubi</h1>
@@ -47,7 +47,7 @@
 - **点赞/收藏**：弹跳动画特效，实时计数更新
 - **评论系统**：楼中楼嵌套回复，评论点赞动画，图片评论
 - **@提及**：评论中 `@用户名` 自动补全，发送通知
-- **关注体系**：关注/粉丝双向关系，隐私控制
+- **关注体系**：关注/粉丝双向关系，互关/回关/已关注状态，隐私控制
 - **分类社区**：贴吧风格分类，关注/发帖/置顶/热门
 
 ### 📡 实时通讯
@@ -81,19 +81,19 @@
 | 首页 | `home_screen.dart` | 分类Tab切换 + 瀑布流帖子列表，下拉刷新/上拉加载/回到顶部 |
 | 发现页 | `discover_screen.dart` | 热门帖子、推荐用户、在线人数、分类入口、数据统计 |
 | 消息页 | `message_screen.dart` | 聊天会话列表，长按浮动菜单（置顶/已读/删除），未读角标 |
-| 我的 | `mine_screen.dart` | 个人信息、帖子/收藏/赞过三Tab、设置入口 |
+| 我的 | `mine_screen.dart` | 小红书风格个人信息页，折叠顶栏，帖子/收藏/赞过/动态四Tab |
 | 发布页 | `publish_screen.dart` | 块编辑器，文字/图片/语音/链接块，录音、话题标签 |
-| 详情页 | `detail_screen.dart` | 帖子内容、图片预览(保存)、语音播放、评论列表(楼中楼)、点赞/收藏/分享 |
+| 详情页 | `detail_screen.dart` | 帖子内容、图片预览(保存)、语音播放、评论列表(楼中楼)、点赞/收藏/分享、互关/回关状态 |
 | 聊天页 | `chat_screen.dart` | 私聊/群聊，消息撤回，本地缓存(200条/会话) |
 | 登录页 | `login_screen.dart` | 密码登录、验证码登录、邮箱注册，原生加载指示器 |
 | 搜索页 | `search_screen.dart` | 搜索帖子/用户，热门关键词，搜索历史 |
 | AI聊天 | `ai_chat_screen.dart` | DeepSeek对话，流式输出，Mac风格代码块 |
 | 分类详情 | `category_screen.dart` | 贴吧风格，分类信息/关注/最新/热门/赞过/置顶帖 |
-| 他人主页 | `user_profile_screen.dart` | 用户信息、关注状态、私信入口、帖子列表 |
+| 他人主页 | `user_profile_screen.dart` | 小红书风格用户主页，折叠顶栏，互关/回关/已关注状态，隐私保护，动态Tab |
 | 编辑资料 | `edit_profile_screen.dart` | 头像/背景图/昵称/简介/性别/生日(中式)/地区 |
 | 通知列表 | `notification_list_screen.dart` | 赞/评论/关注/系统 分Tab展示 |
 | 设置页 | `settings_screen.dart` | 缓存清理、版本更新、关于、退出登录 |
-| 隐私设置 | `privacy_settings_screen.dart` | 关注/粉丝/赞过列表隐私，修改用户名/邮箱(验证码)/密码 |
+| 隐私设置 | `privacy_settings_screen.dart` | 关注/粉丝/获赞与收藏/动态列表隐私，修改用户名/邮箱(验证码)/密码 |
 | 通知设置 | `notification_settings_screen.dart` | 推送/赞/评论/关注/收藏/聊天 通知开关 |
 | 内置浏览器 | `in_app_browser_screen.dart` | WebView，顶栏导航，更多菜单(复制链接/浏览器打开/刷新) |
 | 图片查看器 | `image_viewer_screen.dart` | 全屏查看，左右滑动，长按保存(小红书风格弹窗) |
@@ -411,7 +411,7 @@ pm2 save
 
 | 版本 | 构建号 | 说明 |
 |------|--------|------|
-| Beta 0.0.5 | 104 | 当前版本 |
+| Beta 0.0.6 | 105 | 当前版本 |
 
 ---
 

@@ -23,6 +23,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
         final privacyFollows = user?.privacyFollows == 1;
         final privacyFans = user?.privacyFans == 1;
         final privacyLikes = user?.privacyLikes == 1;
+        final privacyActivities = (user?.privacyActivities ?? 0) == 1;
         final email = user?.email ?? '';
         final username = user?.username ?? '';
 
@@ -60,7 +61,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                       _buildGroup([
                         _buildSwitchItem('隐藏我的关注列表', privacyFollows, (v) => _updatePrivacy(up, 'privacy_follows', v)),
                         _buildSwitchItem('隐藏我的粉丝列表', privacyFans, (v) => _updatePrivacy(up, 'privacy_fans', v)),
-                        _buildSwitchItem('隐藏我的动态列表', privacyLikes, (v) => _updatePrivacy(up, 'privacy_likes', v)),
+                        _buildSwitchItem('隐藏我的获赞与收藏', privacyLikes, (v) => _updatePrivacy(up, 'privacy_likes', v)),
+                        _buildSwitchItem('隐藏我的动态', privacyActivities, (v) => _updatePrivacy(up, 'privacy_activities', v)),
                       ]),
                     ],
                   ),

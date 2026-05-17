@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
 const { getIpLocation, getClientIp } = require('../utils/ip-location')
+const { pushNotification } = require('../utils/ws-helper')
 const router = express.Router()
 
 // 提取话题标签
@@ -307,7 +308,7 @@ router.get('/:id', async (req, res) => {
 			ratio: i.ratio || 1.2
 		}))
 
-		const post = { ...rows[0], images, isLiked: false, isCollected: false }
+		const post = { ...rows[0], images, isLiked: false, isCollected: false, is_followed: false, is_fan: false }
 
 		if (post.content_blocks && typeof post.content_blocks === 'string') {
 			try { post.content_blocks = JSON.parse(post.content_blocks) } catch (e) { post.content_blocks = null }
@@ -332,6 +333,12 @@ router.get('/:id', async (req, res) => {
 				const [cl] = await db.query('SELECT id FROM collects WHERE user_id=? AND post_id=?', [user.id, post.id])
 				post.isLiked = lk.length > 0
 				post.isCollected = cl.length > 0
+				if (user.id !== post.user_id) {
+					const [fl] = await db.query('SELECT id FROM follows WHERE follower_id=? AND following_id=?', [user.id, post.user_id])
+					post.is_followed = fl.length > 0
+					const [fan] = await db.query('SELECT id FROM follows WHERE follower_id=? AND following_id=?', [post.user_id, user.id])
+					post.is_fan = fan.length > 0
+				}
 			} catch {}
 		}
 
@@ -451,6 +458,7 @@ router.post('/:id/like', auth, async (req, res) => {
 		if (exist.length) {
 			await db.query('DELETE FROM likes WHERE user_id=? AND target_id=? AND target_type=1', [req.user.id, postId])
 			await db.query('UPDATE posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = ?', [postId])
+			await db.query('UPDATE users SET like_count = GREATEST(like_count - 1, 0) WHERE id = (SELECT user_id FROM posts WHERE id = ?)', [postId])
 			await db.query('DELETE FROM activities WHERE user_id = ? AND type = 2 AND target_id = ? AND target_type = 1', [req.user.id, postId])
 			res.json({ code: 200, msg: '取消点赞', data: { liked: false } })
 		} else {
@@ -461,6 +469,7 @@ router.post('/:id/like', auth, async (req, res) => {
 			if (post.length && post[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 1, ?, ?)',
 					[req.user.id, post[0].user_id, '赞了你的笔记', postId])
+				pushNotification(db, post[0].user_id, 1, req.user.id, postId)
 			}
 			// 记录活动
 			await db.query('INSERT INTO activities (user_id, type, target_id, target_type, content) VALUES (?, 2, ?, 1, ?)',
@@ -480,16 +489,19 @@ router.post('/:id/collect', auth, async (req, res) => {
 		if (exist.length) {
 			await db.query('DELETE FROM collects WHERE user_id=? AND post_id=?', [req.user.id, postId])
 			await db.query('UPDATE posts SET collects_count = GREATEST(collects_count - 1, 0) WHERE id = ?', [postId])
+			await db.query('UPDATE users SET collect_count = GREATEST(collect_count - 1, 0) WHERE id = (SELECT user_id FROM posts WHERE id = ?)', [postId])
 			await db.query('DELETE FROM activities WHERE user_id = ? AND type = 4 AND target_id = ? AND target_type = 1', [req.user.id, postId])
 			res.json({ code: 200, msg: '取消收藏', data: { collected: false } })
 		} else {
 			await db.query('INSERT INTO collects (user_id, post_id) VALUES (?, ?)', [req.user.id, postId])
 			await db.query('UPDATE posts SET collects_count = collects_count + 1 WHERE id = ?', [postId])
+			await db.query('UPDATE users SET collect_count = collect_count + 1 WHERE id = (SELECT user_id FROM posts WHERE id = ?)', [postId])
 			// 收藏通知
 			const [post] = await db.query('SELECT user_id FROM posts WHERE id = ?', [postId])
 			if (post.length && post[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 6, ?, ?)',
 					[req.user.id, post[0].user_id, '收藏了你的笔记', postId])
+				pushNotification(db, post[0].user_id, 6, req.user.id, postId)
 			}
 			// 记录活动
 			await db.query('INSERT INTO activities (user_id, type, target_id, target_type, content) VALUES (?, 4, ?, 1, ?)',

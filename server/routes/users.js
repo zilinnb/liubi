@@ -1,6 +1,7 @@
 const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
+const { pushNotification } = require('../utils/ws-helper')
 const router = express.Router()
 
 // 搜索用户
@@ -70,7 +71,7 @@ router.get('/mention-search', auth, async (req, res) => {
 router.get('/:id', async (req, res) => {
 	try {
 		const [rows] = await db.query(
-			'SELECT id,username,nickname,avatar,bg_image,bio,gender,birthday,location,fans_count,follow_count,like_count,privacy_follows,privacy_fans,privacy_likes,created_at FROM users WHERE id = ? AND status = 1',
+			'SELECT id,username,nickname,avatar,bg_image,bio,gender,birthday,location,fans_count,follow_count,like_count,collect_count,privacy_follows,privacy_fans,privacy_likes,privacy_activities,created_at FROM users WHERE id = ? AND status = 1',
 			[req.params.id]
 		)
 		if (!rows.length) return res.json({ code: 404, msg: '用户不存在' })
@@ -81,6 +82,7 @@ router.get('/:id', async (req, res) => {
 		user.can_see_follows = true
 		user.can_see_fans = true
 		user.can_see_likes = true
+		user.can_see_activities = true
 
 		const token = req.headers.authorization?.replace('Bearer ', '')
 		if (token) {
@@ -97,17 +99,20 @@ router.get('/:id', async (req, res) => {
 					user.can_see_follows = user.privacy_follows === 0
 					user.can_see_fans = user.privacy_fans === 0
 					user.can_see_likes = user.privacy_likes === 0
+					user.can_see_activities = (user.privacy_activities || 0) === 0
 				}
 			} catch {}
 		} else {
 			user.can_see_follows = user.privacy_follows === 0
 			user.can_see_fans = user.privacy_fans === 0
 			user.can_see_likes = user.privacy_likes === 0
+			user.can_see_activities = (user.privacy_activities || 0) === 0
 		}
 
 		delete user.privacy_follows
 		delete user.privacy_fans
 		delete user.privacy_likes
+		delete user.privacy_activities
 
 		res.json({ code: 200, data: user })
 	} catch (e) {
@@ -136,6 +141,7 @@ router.post('/:id/follow', auth, async (req, res) => {
 			await db.query('UPDATE users SET fans_count = fans_count + 1 WHERE id = ?', [targetId])
 			await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content) VALUES (?, ?, 3, ?)',
 				[req.user.id, targetId, '关注了你'])
+			pushNotification(db, targetId, 3, req.user.id, null)
 			await db.query('INSERT INTO activities (user_id, type, target_id, target_type, content) VALUES (?, 5, ?, 2, ?)',
 				[req.user.id, targetId, '关注了用户'])
 			const [fanCheck2] = await db.query('SELECT id FROM follows WHERE follower_id = ? AND following_id = ?', [targetId, req.user.id])
@@ -418,6 +424,24 @@ router.get('/:id/likes', auth, async (req, res) => {
 // 获取用户动态
 router.get('/:id/activities', async (req, res) => {
 	try {
+		const [privacyRows] = await db.query('SELECT privacy_activities FROM users WHERE id = ? AND status = 1', [req.params.id])
+		if (!privacyRows.length) return res.json({ code: 404, msg: '用户不存在' })
+
+		const token = req.headers.authorization?.replace('Bearer ', '')
+		let currentUserId = null
+		if (token) {
+			try {
+				const jwt = require('jsonwebtoken')
+				const { JWT_SECRET } = require('../config/env')
+				const me = jwt.verify(token, JWT_SECRET)
+				currentUserId = me.id
+			} catch {}
+		}
+
+		if (Number(req.params.id) !== currentUserId && (privacyRows[0].privacy_activities || 0) === 1) {
+			return res.json({ code: 403, msg: '对方动态不公开', data: [] })
+		}
+
 		const { page = 1, pageSize = 20 } = req.query
 		const offset = (page - 1) * pageSize
 
@@ -443,6 +467,12 @@ router.get('/:id/activities', async (req, res) => {
 					FROM posts p WHERE p.id = ?`, [a.target_id]
 				)
 				a.post = postRows.length ? postRows[0] : null
+			}
+			if (a.target_type === 2 && a.target_id) {
+				const [userRows] = await db.query(
+					`SELECT id, nickname, avatar FROM users WHERE id = ?`, [a.target_id]
+				)
+				a.target_user = userRows.length ? userRows[0] : null
 			}
 		}
 

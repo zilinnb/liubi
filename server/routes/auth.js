@@ -159,7 +159,7 @@ router.post('/login-code', async (req, res) => {
 		res.json({
 			code: 200, msg: '登录成功', data: {
 				token,
-				user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, bio: user.bio, email: user.email, role: user.role, fans_count: user.fans_count, follow_count: user.follow_count, like_count: user.like_count }
+				user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, bio: user.bio, email: user.email, role: user.role, fans_count: user.fans_count, follow_count: user.follow_count, like_count: user.like_count, collect_count: user.collect_count }
 			}
 		})
 	} catch (e) {
@@ -197,7 +197,7 @@ router.post('/login', async (req, res) => {
 		res.json({
 			code: 200, msg: '登录成功', data: {
 				token,
-				user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, bio: user.bio, email: user.email, role: user.role, fans_count: user.fans_count, follow_count: user.follow_count, like_count: user.like_count }
+				user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, bio: user.bio, email: user.email, role: user.role, fans_count: user.fans_count, follow_count: user.follow_count, like_count: user.like_count, collect_count: user.collect_count }
 			}
 		})
 	} catch (e) {
@@ -300,7 +300,7 @@ router.post('/change-username', auth, async (req, res) => {
 router.get('/profile', auth, async (req, res) => {
 	try {
 		const [rows] = await db.query(
-			'SELECT id,username,nickname,avatar,bg_image,email,bio,gender,birthday,location,role,fans_count,follow_count,like_count,privacy_follows,privacy_fans,privacy_likes,username_changed_at,created_at FROM users WHERE id = ?',
+			'SELECT id,username,nickname,avatar,bg_image,email,bio,gender,birthday,location,role,fans_count,follow_count,like_count,collect_count,privacy_follows,privacy_fans,privacy_likes,privacy_activities,username_changed_at,created_at FROM users WHERE id = ?',
 			[req.user.id]
 		)
 		if (!rows.length) return res.json({ code: 404, msg: '用户不存在' })
@@ -313,7 +313,7 @@ router.get('/profile', auth, async (req, res) => {
 // 更新个人资料（含性别、生日、隐私设置）
 	router.put('/profile', auth, async (req, res) => {
 	try {
-		const allowed = ['nickname', 'avatar', 'bg_image', 'bio', 'gender', 'birthday', 'privacy_follows', 'privacy_fans', 'privacy_likes']
+		const allowed = ['nickname', 'avatar', 'bg_image', 'bio', 'gender', 'birthday', 'privacy_follows', 'privacy_fans', 'privacy_likes', 'privacy_activities']
 		const sets = []
 		const vals = []
 		for (const key of allowed) {

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'storage_service.dart';
@@ -153,7 +153,7 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
         } else if (type == 'notification') {
           final notifData = parsed['data'] as Map<String, dynamic>?;
           if (notifData != null) {
-            _showLocalNotification(notifData);
+            _handleSocialNotification(notifData);
           }
         }
       } else if (type == 'pong') {
@@ -165,30 +165,56 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _handleChatNotification(Map<String, dynamic> msg) async {
-    if (_isAppInForeground) return;
     final data = msg['data'] as Map<String, dynamic>?;
     if (data == null) return;
     final senderName = data['sender_name'] as String? ?? '';
     final content = data['content'] as String? ?? '';
     final convId = data['conversation_id'];
+    final senderAvatar = data['sender_avatar'] as String? ?? '';
     if (senderName.isEmpty && content.isEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
     final chatNotifEnabled = prefs.getBool('notify_chat') ?? true;
     if (!chatNotifEnabled) return;
+
     String displayContent = content;
     final msgType = data['type'] as int? ?? 1;
     if (msgType == 2) displayContent = '[图片]';
     if (msgType == 3) displayContent = '[语音]';
-    await NotificationService.showNotification(
-      title: senderName.isNotEmpty ? senderName : '新消息',
-      body: displayContent,
-      payload: 'chat:$convId',
-      channelId: 'liubi_chat',
-    );
+
+    final title = senderName.isNotEmpty ? senderName : '新消息';
+    final payload = 'chat:$convId';
+
+    if (_isAppInForeground) {
+      NotificationService.showInAppBanner(
+        title: title,
+        body: displayContent,
+        avatarUrl: senderAvatar,
+        icon: Icons.chat_bubble,
+        iconColor: const Color(0xFF07C160),
+        onTap: () {
+          final id = convId is int ? convId : int.tryParse(convId.toString());
+          if (id != null) {
+            navigatorKey.currentState?.pushNamed('/chat', arguments: {
+              'id': id,
+              'name': senderName,
+              'avatar': senderAvatar,
+              'otherUserId': data['sender_id'] ?? 0,
+            });
+          }
+        },
+      );
+    } else {
+      await NotificationService.showNotification(
+        title: title,
+        body: displayContent,
+        payload: payload,
+        channelId: 'liubi_chat',
+      );
+    }
   }
 
-  Future<void> _showLocalNotification(Map<String, dynamic> data) async {
-    if (_isAppInForeground) return;
+  Future<void> _handleSocialNotification(Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
     final pushEnabled = prefs.getBool('push_enabled') ?? true;
     if (!pushEnabled) return;
@@ -196,33 +222,82 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
     final notifType = data['notif_type'] as int?;
     if (notifType == null) return;
 
+    final fromUserName = data['from_user_name'] as String? ?? '';
+    final fromUserAvatar = data['from_user_avatar'] as String? ?? '';
+    final targetTitle = data['target_title'] as String? ?? '';
+    final targetId = data['target_id'];
+    final fromUserId = data['from_user_id'];
+
     String title;
     String body;
     bool enabled;
+    IconData icon;
+    Color iconColor;
+    String payload;
+
     switch (notifType) {
       case 1:
         enabled = prefs.getBool('notify_like') ?? true;
-        title = '新的赞';
-        body = '有人赞了你的内容';
+        title = fromUserName.isNotEmpty ? '$fromUserName 赞了你' : '新的赞';
+        body = targetTitle.isNotEmpty ? targetTitle : '有人赞了你的内容';
+        icon = Icons.favorite;
+        iconColor = const Color(0xFFFF2442);
+        payload = 'like:$targetId';
       case 2:
         enabled = prefs.getBool('notify_comment') ?? true;
-        title = '新的评论';
-        body = '有人评论了你的内容';
+        title = fromUserName.isNotEmpty ? '$fromUserName 评论了你' : '新的评论';
+        body = targetTitle.isNotEmpty ? targetTitle : '有人评论了你的内容';
+        icon = Icons.chat_bubble_outline;
+        iconColor = const Color(0xFF4A90D9);
+        payload = 'comment:$targetId';
       case 3:
         enabled = prefs.getBool('notify_follow') ?? true;
-        title = '新的关注';
-        body = '有人关注了你';
+        title = fromUserName.isNotEmpty ? '$fromUserName 关注了你' : '新的关注';
+        body = fromUserName.isNotEmpty ? '快去看看吧' : '有人关注了你';
+        icon = Icons.person_add;
+        iconColor = const Color(0xFF07C160);
+        payload = 'follow:$fromUserId';
       case 6:
         enabled = prefs.getBool('notify_collect') ?? true;
-        title = '新的收藏';
-        body = '有人收藏了你的内容';
+        title = fromUserName.isNotEmpty ? '$fromUserName 收藏了你' : '新的收藏';
+        body = targetTitle.isNotEmpty ? targetTitle : '有人收藏了你的内容';
+        icon = Icons.bookmark;
+        iconColor = const Color(0xFFFFAA00);
+        payload = 'like:$targetId';
       default:
         return;
     }
 
     if (!enabled) return;
 
-    await NotificationService.showNotification(title: title, body: body, payload: 'notifications');
+    if (_isAppInForeground) {
+      NotificationService.showInAppBanner(
+        title: title,
+        body: body,
+        avatarUrl: fromUserAvatar,
+        icon: icon,
+        iconColor: iconColor,
+        onTap: () {
+          if (notifType == 3) {
+            final uid = fromUserId is int ? fromUserId : int.tryParse(fromUserId.toString());
+            if (uid != null) {
+              navigatorKey.currentState?.pushNamed('/user-profile', arguments: uid);
+            }
+          } else {
+            final pid = targetId is int ? targetId : int.tryParse(targetId.toString());
+            if (pid != null) {
+              navigatorKey.currentState?.pushNamed('/detail', arguments: pid);
+            }
+          }
+        },
+      );
+    } else {
+      await NotificationService.showNotification(
+        title: title,
+        body: body,
+        payload: payload,
+      );
+    }
   }
 
   void _onError(dynamic error) {

@@ -99,6 +99,8 @@ class Post {
   final int status;
   bool isLiked;
   bool isCollected;
+  bool isFollowed;
+  bool isFan;
   final int isPinned;
   final int isPrivate;
   final String location;
@@ -129,6 +131,8 @@ class Post {
     this.status = 1,
     this.isLiked = false,
     this.isCollected = false,
+    this.isFollowed = false,
+    this.isFan = false,
     this.isPinned = 0,
     this.isPrivate = 0,
     this.location = '',
@@ -173,6 +177,8 @@ class Post {
       status: json['status'] ?? 1,
       isLiked: json['isLiked'] ?? false,
       isCollected: json['isCollected'] ?? false,
+      isFollowed: json['is_followed'] ?? false,
+      isFan: json['is_fan'] ?? false,
       isPinned: json['is_pinned'] ?? 0,
       isPrivate: json['is_private'] ?? json['isPrivate'] ?? 0,
       location: json['location'] ?? '',
@@ -206,6 +212,8 @@ class Post {
       'status': status,
       'isLiked': isLiked,
       'isCollected': isCollected,
+      'isFollowed': isFollowed,
+      'isFan': isFan,
       'is_pinned': isPinned,
       'is_private': isPrivate,
       'location': location,
@@ -238,6 +246,8 @@ class Post {
     int? status,
     bool? isLiked,
     bool? isCollected,
+    bool? isFollowed,
+    bool? isFan,
     int? isPinned,
     int? isPrivate,
     String? location,
@@ -268,6 +278,8 @@ class Post {
       status: status ?? this.status,
       isLiked: isLiked ?? this.isLiked,
       isCollected: isCollected ?? this.isCollected,
+      isFollowed: isFollowed ?? this.isFollowed,
+      isFan: isFan ?? this.isFan,
       isPinned: isPinned ?? this.isPinned,
       isPrivate: isPrivate ?? this.isPrivate,
       location: location ?? this.location,

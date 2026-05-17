@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
 const { getIpLocation, getClientIp } = require('../utils/ip-location')
+const { pushNotification } = require('../utils/ws-helper')
 const router = express.Router()
 
 // 提取@用户
@@ -109,12 +110,14 @@ router.post('/', auth, async (req, res) => {
 			if (parent.length && parent[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 2, ?, ?)',
 					[req.user.id, parent[0].user_id, '回复了你的评论', post_id])
+				pushNotification(db, parent[0].user_id, 2, req.user.id, post_id)
 			}
 		} else {
 			const [post] = await db.query('SELECT user_id FROM posts WHERE id = ?', [post_id])
 			if (post.length && post[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 2, ?, ?)',
 					[req.user.id, post[0].user_id, '评论了你的笔记', post_id])
+				pushNotification(db, post[0].user_id, 2, req.user.id, post_id)
 			}
 		}
 

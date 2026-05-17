@@ -34,6 +34,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   int _commentPage = 1;
   bool _noMoreComments = false;
   bool _isFollowing = false;
+  bool _isFan = false;
   String _commentSort = 'latest';
   final Map<int, bool> _stackExpanded = {};
   final Map<int, bool> _subExpanded = {};
@@ -158,7 +159,8 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     final res = await pp.fetchPostById(widget.postId);
     if (mounted) {
       if (res['code'] == 200 && res['post'] != null) {
-        setState(() { _post = res['post'] as Post; _loading = false; });
+        final post = res['post'] as Post;
+        setState(() { _post = post; _isFollowing = post.isFollowed; _isFan = post.isFan; _loading = false; });
         _loadComments();
       } else if (res['code'] == 403) {
         setState(() { _loading = false; _isPrivateBlocked = true; _privateMsg = res['msg'] ?? '该图文已被对方私密，无法查看'; });
@@ -173,7 +175,8 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     final res = await pp.fetchPostById(widget.postId);
     if (mounted) {
       if (res['code'] == 200 && res['post'] != null) {
-        setState(() { _post = res['post'] as Post; _loading = false; });
+        final post = res['post'] as Post;
+        setState(() { _post = post; _isFollowing = post.isFollowed; _isFan = post.isFan; _loading = false; });
         _loadComments();
       } else if (res['code'] == 403) {
         setState(() { _loading = false; _isPrivateBlocked = true; _privateMsg = res['msg'] ?? '该图文已被对方私密，无法查看'; });
@@ -219,8 +222,17 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   void _toggleFollow() {
     if (_post == null) return;
-    Provider.of<UserProvider>(context, listen: false).followUser(_post!.userId);
-    setState(() => _isFollowing = !_isFollowing);
+    final up = Provider.of<UserProvider>(context, listen: false);
+    up.followUser(_post!.userId).then((res) {
+      if (res['code'] == 200 && mounted) {
+        final followed = res['data']?['followed'] as bool? ?? !_isFollowing;
+        final isFan = res['data']?['is_fan'] as bool? ?? _isFan;
+        setState(() {
+          _isFollowing = followed;
+          _isFan = isFan;
+        });
+      }
+    });
   }
 
   Future<void> _toggleVoice(int idx, String url) async {
@@ -914,7 +926,10 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                 borderRadius: BorderRadius.circular(12),
                 border: _isFollowing ? Border.all(color: const Color(0xFFE8E8E8), width: 0.5) : null,
               ),
-              child: Text(_isFollowing ? '已关注' : '+ 关注', style: TextStyle(fontSize: 12, color: _isFollowing ? const Color(0xFF999999) : Colors.white, fontWeight: _isFollowing ? FontWeight.w400 : FontWeight.w600)),
+              child: Text(
+                _isFollowing && _isFan ? '互关' : (_isFollowing ? '已关注' : (_isFan ? '回关' : '+ 关注')),
+                style: TextStyle(fontSize: 12, color: _isFollowing ? const Color(0xFF999999) : Colors.white, fontWeight: _isFollowing ? FontWeight.w400 : FontWeight.w600),
+              ),
             ),
           );
         }),
