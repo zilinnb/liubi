@@ -227,9 +227,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     Navigator.pop(context);
     if (res['code'] == 200) {
-      _showSuccess(text: '注册成功', onClose: () {
-        if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-      });
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
     } else {
       AppToast.error(context, message: res['msg'] ?? '注册失败');
     }

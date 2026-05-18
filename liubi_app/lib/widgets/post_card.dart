@@ -103,6 +103,7 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
 
   Widget _buildImageCover(Post p) {
     final h = _coverHeight();
+    final isLive = p.images.isNotEmpty && p.images.first.videoUrl.isNotEmpty;
     return SizedBox(
       width: double.infinity,
       height: h,
@@ -115,11 +116,26 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
             placeholder: (_, __) => Container(color: const Color(0xFFF5F5F5)),
             errorWidget: (_, __, ___) => Container(color: const Color(0xFFF0F0F0), child: const Icon(Icons.image_not_supported, color: Color(0xFFCCCCCC), size: 24)),
           ),
-          Positioned(
-            left: 6,
-            top: 6,
-            child: _buildViewBadge(p),
-          ),
+          if (isLive)
+            Positioned(
+              left: 6,
+              top: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset('assets/icons/icon_live_photo.png', width: 12, height: 12),
+                    const SizedBox(width: 2),
+                    const Text('LIVE', style: TextStyle(fontSize: 9, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+            ),
           if (p.images.length > 1)
             Positioned(
               right: 6,
@@ -133,9 +149,14 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
                 child: Text('${p.images.length}', style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w500)),
               ),
             ),
+          Positioned(
+            left: 6,
+            bottom: 6,
+            child: _buildViewBadge(p),
+          ),
           if (p.voiceUrl != null && p.voiceUrl!.isNotEmpty)
             Positioned(
-              left: 6,
+              right: 6,
               bottom: 6,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -193,7 +214,7 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
         ),
         Positioned(
           left: 6,
-          top: 6,
+          bottom: 6,
           child: _buildViewBadge(p),
         ),
       ],
@@ -224,7 +245,7 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
         ),
         Positioned(
           left: 6,
-          top: 6,
+          bottom: 6,
           child: _buildViewBadge(p),
         ),
       ],
@@ -258,7 +279,7 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
         ),
         Positioned(
           left: 6,
-          top: 6,
+          bottom: 6,
           child: _buildViewBadge(p),
         ),
       ],

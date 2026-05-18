@@ -318,7 +318,7 @@ router.get('/:id', async (req, res) => {
 		if (!post.content_blocks && (post.content || post.images?.length)) {
 			const synthetic = []
 			if (post.content) synthetic.push({ type: 'text', content: post.content })
-			if (post.images?.length) synthetic.push({ type: 'image', images: post.images.map(img => ({ url: img.url, ratio: img.ratio || 1.2 })), layout: 'grid' })
+			if (post.images?.length) synthetic.push({ type: 'images', images: post.images.map(img => ({ url: img.url, type: img.type, video_url: img.video_url, ratio: img.ratio || 1.2 })), layout: 'grid' })
 			if (post.link) synthetic.push({ type: 'link', url: post.link })
 			post.content_blocks = synthetic
 		}

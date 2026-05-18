@@ -268,7 +268,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
           : NestedScrollView(
               headerSliverBuilder: (ctx, _) => [
                 SliverAppBar(
-                  expandedHeight: statusBarH + 260,
+                  expandedHeight: statusBarH + 185,
                   pinned: true,
                   floating: false,
                   snap: false,
@@ -382,7 +382,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final curH = constraints.biggest.height;
-      final totalExpand = statusBarH + 260.0;
+      final totalExpand = statusBarH + 185.0;
       final cp =
           (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0))
               .clamp(0.0, 1.0);
@@ -564,14 +564,15 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                   if (bio.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildExpandableBio(bio),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    const Text('这个用户很懒，没有设置签名...', style: TextStyle(fontSize: 13, color: Colors.white60)),
                   ],
                   if (location.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('IP属地: $location',
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.white60)),
+                    const SizedBox(height: 12),
+                    Text('IP属地: $location', style: const TextStyle(fontSize: 11, color: Colors.white60)),
                   ],
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -653,8 +654,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 0.5),
                             ),
-                            child: const Text('私信',
-                                style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
+                            child: const Text('私信', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
                           ),
                         ),
                       ],

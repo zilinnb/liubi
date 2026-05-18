@@ -39,9 +39,9 @@ router.get('/post/:postId', async (req, res) => {
 		const sort = req.query.sort || 'latest'
 		let orderClause
 		if (sort === 'hot') {
-			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at ASC'
+			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at DESC'
 		} else {
-			orderClause = 'c.is_pinned DESC, c.created_at ASC'
+			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at DESC'
 		}
 
 		const [rows] = await db.query(
@@ -90,15 +90,15 @@ router.get('/post/:postId', async (req, res) => {
 // 发表评论（支持图片和@提及）
 router.post('/', auth, async (req, res) => {
 	try {
-		const { post_id, parent_id, content, image_url } = req.body
-		if (!post_id || (!content && !image_url)) return res.json({ code: 400, msg: '参数不完整' })
+		const { post_id, parent_id, content, image_url, voice_url, voice_duration } = req.body
+		if (!post_id || (!content && !image_url && !voice_url)) return res.json({ code: 400, msg: '参数不完整' })
 
 		const clientIp = getClientIp(req)
 		const location = await getIpLocation(clientIp)
 
 		const [result] = await db.query(
-			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, location) VALUES (?, ?, ?, ?, ?, ?)',
-			[post_id, req.user.id, parent_id || null, content || '', image_url || '', location]
+			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, voice_url, voice_duration, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+			[post_id, req.user.id, parent_id || null, content || '', image_url || '', voice_url || '', voice_duration || 0, location]
 		)
 		await db.query('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?', [post_id])
 

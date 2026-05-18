@@ -23,7 +23,7 @@ class AiChatScreen extends StatefulWidget {
   State<AiChatScreen> createState() => _AiChatScreenState();
 }
 
-class _AiChatScreenState extends State<AiChatScreen> with TickerProviderStateMixin {
+class _AiChatScreenState extends State<AiChatScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final List<_ChatMessage> _messages = [];
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
@@ -34,12 +34,25 @@ class _AiChatScreenState extends State<AiChatScreen> with TickerProviderStateMix
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _dotCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
     _loadHistory();
   }
 
   @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // 当键盘弹出或收起时，延迟一点滚动到底部
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        _scrollToBottom();
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dotCtrl.dispose();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();

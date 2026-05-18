@@ -344,6 +344,22 @@ class _MessageScreenState extends State<MessageScreen> {
     return '${date.year}年${date.month}月';
   }
 
+  static final _emojiPattern = RegExp(r'\[emoji:[^\]]+\]');
+
+  String _formatLastMsg(Conversation conv) {
+    String msg = conv.lastMessage;
+    // 如果是上传文件路径（.m4a, .jpg 等），显示合适的占位符
+    if (msg.startsWith('/uploads/')) {
+      if (msg.endsWith('.m4a') || msg.endsWith('.mp3') || msg.endsWith('.wav')) {
+        return '[语音]';
+      } else if (msg.endsWith('.jpg') || msg.endsWith('.jpeg') || msg.endsWith('.png') || msg.endsWith('.gif')) {
+        return '[图片]';
+      }
+    }
+    // 其他情况正常处理
+    return msg.replaceAll(_emojiPattern, '[表情]');
+  }
+
   Widget _buildConversationItem(Conversation conv) {
     final isGroup = conv.type == 2;
     final isPinned = conv.isPinned;
@@ -403,7 +419,7 @@ class _MessageScreenState extends State<MessageScreen> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(conv.lastMessage, style: const TextStyle(fontSize: 13, color: Color(0xFF999999)), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(_formatLastMsg(conv), style: const TextStyle(fontSize: 13, color: Color(0xFF999999)), maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
@@ -502,16 +518,11 @@ class _MessageScreenState extends State<MessageScreen> {
     final avatarSrc = conv.avatar.isNotEmpty ? conv.avatar : (conv.memberAvatars.isNotEmpty ? conv.memberAvatars.first : '');
     final avatarUrl = fullUrl(avatarSrc);
     final colorId = conv.otherUserId > 0 ? conv.otherUserId : conv.id;
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(color: const Color(0xFFF0F0F0), borderRadius: BorderRadius.circular(6)),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: avatarUrl.isNotEmpty
-            ? CachedNetworkImage(imageUrl: avatarUrl, width: 48, height: 48, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: getColorForId(colorId), alignment: Alignment.center, child: Text(conv.name.isNotEmpty ? conv.name[0] : '?', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600))))
-            : Container(color: getColorForId(colorId), alignment: Alignment.center, child: Text(conv.name.isNotEmpty ? conv.name[0] : '?', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600))),
-      ),
+    return CircleAvatar(
+      radius: 24,
+      backgroundImage: avatarUrl.isNotEmpty ? CachedNetworkImageProvider(avatarUrl) : null,
+      backgroundColor: avatarUrl.isEmpty ? getColorForId(colorId) : null,
+      child: avatarUrl.isEmpty ? Text(conv.name.isNotEmpty ? conv.name[0] : '?', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600)) : null,
     );
   }
 
@@ -522,27 +533,28 @@ class _MessageScreenState extends State<MessageScreen> {
     return Container(
       width: 48,
       height: 48,
-      decoration: BoxDecoration(color: const Color(0xFFF0F0F0), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(color: const Color(0xFFF0F0F0), shape: BoxShape.circle),
       child: avatars.isEmpty
-          ? Container(decoration: BoxDecoration(color: getColorForId(conv.id), borderRadius: BorderRadius.circular(8)), alignment: Alignment.center, child: Text(conv.name.isNotEmpty ? conv.name[0] : '?', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600)))
-          : GridView.count(
-              crossAxisCount: 2,
-              padding: const EdgeInsets.all(2),
-              physics: const NeverScrollableScrollPhysics(),
-              children: List.generate(avatars.length.clamp(0, 4), (i) {
-                final url = fullUrl(avatars[i]);
-                final name = i < names.length ? names[i] : '?';
-                final id = i < ids.length ? ids[i] : avatars[i].hashCode;
-                return Padding(
-                  padding: const EdgeInsets.all(1),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: url.isNotEmpty
-                        ? CachedNetworkImage(imageUrl: url, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.w600))))
-                        : Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.w600))),
-                  ),
-                );
-              }),
+          ? Container(decoration: BoxDecoration(color: getColorForId(conv.id), shape: BoxShape.circle), alignment: Alignment.center, child: Text(conv.name.isNotEmpty ? conv.name[0] : '?', style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600)))
+          : ClipOval(
+              child: GridView.count(
+                crossAxisCount: 2,
+                padding: const EdgeInsets.all(2),
+                physics: const NeverScrollableScrollPhysics(),
+                children: List.generate(avatars.length.clamp(0, 4), (i) {
+                  final url = fullUrl(avatars[i]);
+                  final name = i < names.length ? names[i] : '?';
+                  final id = i < ids.length ? ids[i] : avatars[i].hashCode;
+                  return Padding(
+                    padding: const EdgeInsets.all(1),
+                    child: ClipOval(
+                      child: url.isNotEmpty
+                          ? CachedNetworkImage(imageUrl: url, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.w600))))
+                          : Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.w600))),
+                    ),
+                  );
+                }),
+              ),
             ),
     );
   }

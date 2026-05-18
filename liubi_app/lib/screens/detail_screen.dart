@@ -7,13 +7,23 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:dio/dio.dart';
+import 'package:gal/gal.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:async';
+import 'package:video_player/video_player.dart';
 import '../models/post.dart';
 import '../models/comment.dart';
 import '../providers/post_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/helpers.dart';
+import '../utils/image_picker_util.dart';
+import '../utils/emoji_text.dart';
+import '../utils/emoji_assets.dart';
 import '../widgets/app_toast.dart';
+import 'package:extended_text_field/extended_text_field.dart';
+import '../widgets/image_preview.dart';
 
 final _urlRegex = RegExp(r'https?://[^\s\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+');
 
@@ -39,6 +49,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   final Map<int, bool> _stackExpanded = {};
   final Map<int, bool> _subExpanded = {};
 
+  VideoPlayerController? _livePhotoCtrl;
+  bool _livePhotoPlaying = false;
+  String? _livePhotoUrl;
+  OverlayEntry? _livePhotoOverlay;
+
   late AnimationController _voiceWaveCtrl;
   int _playingVoiceIdx = -1;
   bool _voiceLoading = false;
@@ -51,7 +66,17 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   bool _titlePinned = false;
   List<String> _commentImages = [];
   bool _isSubmitting = false;
+  bool _showCommentEmojiPanel = false;
+  bool _commentEmojiInserting = false;
+  bool _isCommentRecording = false;
+  int _commentRecordSeconds = 0;
+  String? _commentVoicePath;
+  int _commentVoiceDuration = 0;
+  int _playingCommentVoiceIdx = -1;
+  bool _commentVoiceLoading = false;
+  bool _isPreviewingCommentVoice = false;
   bool _imageUploading = false;
+  bool _isSavingImage = false;
   final ValueNotifier<String> _inputText = ValueNotifier('');
   bool _isEditing = false;
   int? _highlightCommentId;
@@ -85,12 +110,19 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     _collectBounceCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
     _scrollCtrl.addListener(_onScroll);
     _commentCtrl.addListener(() => _inputText.value = _commentCtrl.text);
-    _commentFocusNode.addListener(_onFocusChange);
+    _commentFocusNode.addListener(() {
+      if (_commentFocusNode.hasFocus && !_commentEmojiInserting) {
+        setState(() => _showCommentEmojiPanel = false);
+      }
+      _onFocusChange();
+    });
     _loadPost();
   }
 
   @override
   void dispose() {
+    _livePhotoCtrl?.dispose();
+    _livePhotoOverlay?.remove();
     _voiceWaveCtrl.dispose();
     _highlightCtrl.dispose();
     _likeBounceCtrl.dispose();
@@ -101,6 +133,8 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     _inputText.dispose();
     _scrollCtrl.dispose();
     _audioPlayer?.dispose();
+    _commentRecorder.dispose();
+    _commentRecTimer?.cancel();
     super.dispose();
   }
 
@@ -129,9 +163,10 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   }
 
   void _onFocusChange() {
-    if (!_commentFocusNode.hasFocus && _isEditing) {
+    if (!_commentFocusNode.hasFocus && _isEditing && !_showCommentEmojiPanel) {
       setState(() {
         _isEditing = false;
+        _showCommentEmojiPanel = false;
         if (_commentCtrl.text.trim().isEmpty && _commentImages.isEmpty) {
           _replyToComment = null;
           _replyParentId = null;
@@ -156,17 +191,24 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   Future<void> _loadPost() async {
     final pp = Provider.of<PostProvider>(context, listen: false);
-    final res = await pp.fetchPostById(widget.postId);
-    if (mounted) {
-      if (res['code'] == 200 && res['post'] != null) {
-        final post = res['post'] as Post;
-        setState(() { _post = post; _isFollowing = post.isFollowed; _isFan = post.isFan; _loading = false; });
-        _loadComments();
-      } else if (res['code'] == 403) {
-        setState(() { _loading = false; _isPrivateBlocked = true; _privateMsg = res['msg'] ?? '该图文已被对方私密，无法查看'; });
-      } else {
-        setState(() => _loading = false);
+    try {
+      final res = await pp.fetchPostById(widget.postId);
+      if (mounted) {
+        if (res['code'] == 200 && res['post'] != null) {
+          final post = res['post'] as Post;
+          debugPrint('[Detail] post loaded: id=${post.id}, title=${post.title}, blocks=${post.contentBlocks.length}, images=${post.images.length}');
+          setState(() { _post = post; _isFollowing = post.isFollowed; _isFan = post.isFan; _loading = false; });
+          _loadComments();
+        } else if (res['code'] == 403) {
+          setState(() { _loading = false; _isPrivateBlocked = true; _privateMsg = res['msg'] ?? '该图文已被对方私密，无法查看'; });
+        } else {
+          debugPrint('[Detail] load failed: code=${res['code']}, msg=${res['msg']}');
+          setState(() => _loading = false);
+        }
       }
+    } catch (e) {
+      debugPrint('[Detail] loadPost error: $e');
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -261,9 +303,9 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     setState(() { _stackExpanded[blockIdx] = !(_stackExpanded[blockIdx] ?? false); });
   }
 
-  void _openGallery(List<String> urls, int initialIndex) {
+  void _openGallery(List<String> urls, int initialIndex, {String? liveVideoUrl}) {
     _dismissKeyboard();
-    Navigator.pushNamed(context, '/image-viewer', arguments: {'urls': urls, 'index': initialIndex});
+    ImagePreview.open(context, url: fullUrl(urls[initialIndex]), liveVideoUrl: liveVideoUrl);
   }
 
   void _setReplyTo(Comment c, {int? parentId}) {
@@ -286,15 +328,29 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   Future<void> _submitComment() async {
     if (_isSubmitting) return;
     final c = _commentCtrl.text.trim();
-    if (c.isEmpty && _commentImages.isEmpty) return;
+    if (c.isEmpty && _commentImages.isEmpty && _commentVoicePath == null) return;
     setState(() => _isSubmitting = true);
     final pp = Provider.of<PostProvider>(context, listen: false);
     final imageStr = _commentImages.isNotEmpty ? _commentImages.join(',') : '';
+
+    String? voiceUrl;
+    int voiceDuration = _commentVoiceDuration;
+    if (_commentVoicePath != null) {
+      voiceUrl = await pp.uploadFile(_commentVoicePath!);
+      if (voiceUrl == null && mounted) {
+        setState(() => _isSubmitting = false);
+        AppToast.error(context, message: '语音上传失败');
+        return;
+      }
+    }
+
     final res = await pp.addComment(
       postId: widget.postId,
       content: c,
       parentId: _replyParentId,
       imageUrl: imageStr,
+      voiceUrl: voiceUrl ?? '',
+      voiceDuration: voiceDuration,
     );
     if (res['code'] == 200 && mounted) {
       _commentCtrl.clear();
@@ -309,6 +365,8 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         parentId: _replyParentId ?? 0,
         content: c,
         imageUrl: imageStr,
+        voiceUrl: voiceUrl ?? '',
+        voiceDuration: voiceDuration,
         nickname: up.userInfo?.nickname ?? '',
         avatar: up.userInfo?.avatar ?? '',
         location: newLocation,
@@ -323,6 +381,8 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       setState(() {
         _isEditing = false;
         _commentImages = [];
+        _commentVoicePath = null;
+        _commentVoiceDuration = 0;
         _replyToComment = null;
         _replyParentId = null;
         _isSubmitting = false;
@@ -393,17 +453,97 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   }
 
   Future<void> _pickCommentImage() async {
-    final picker = ImagePicker();
-    final xFile = await picker.pickImage(source: ImageSource.gallery, maxWidth: 800);
-    if (xFile == null) return;
+    final imgPath = await ImagePickerUtil.pickSingleImage(context);
+    if (imgPath == null) return;
     setState(() { _imageUploading = true; });
     final pp = Provider.of<PostProvider>(context, listen: false);
-    final url = await pp.uploadImage(xFile.path);
+    final url = await pp.uploadImage(imgPath);
     if (url != null && mounted) {
       setState(() { _commentImages.add(url); _imageUploading = false; });
     } else if (mounted) {
       setState(() { _imageUploading = false; });
       AppToast.error(context, message: '图片上传失败');
+    }
+  }
+
+  Timer? _commentRecTimer;
+  final AudioRecorder _commentRecorder = AudioRecorder();
+
+  Future<void> _startCommentRecording() async {
+    try {
+      if (!await _commentRecorder.hasPermission()) return;
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/comment_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _commentRecorder.start(const RecordConfig(), path: path);
+      setState(() {
+        _isCommentRecording = true;
+        _commentRecordSeconds = 0;
+        _commentVoicePath = null;
+        _commentVoiceDuration = 0;
+      });
+      _commentRecTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        setState(() => _commentRecordSeconds++);
+      });
+    } catch (e) {
+      if (mounted) AppToast.error(context, message: '录音失败');
+    }
+  }
+
+  Future<void> _stopCommentRecording() async {
+    _commentRecTimer?.cancel();
+    final path = await _commentRecorder.stop();
+    setState(() {
+      _isCommentRecording = false;
+      _commentVoicePath = path;
+      _commentVoiceDuration = _commentRecordSeconds;
+    });
+  }
+
+  void _removeCommentVoice() {
+    _audioPlayer?.stop();
+    setState(() {
+      _commentVoicePath = null;
+      _commentVoiceDuration = 0;
+      _isPreviewingCommentVoice = false;
+    });
+  }
+
+  Future<void> _previewCommentVoice(String path) async {
+    if (_isPreviewingCommentVoice) {
+      await _audioPlayer?.stop();
+      setState(() => _isPreviewingCommentVoice = false);
+      return;
+    }
+    setState(() => _commentVoiceLoading = true);
+    try {
+      _audioPlayer?.dispose();
+      _audioPlayer = AudioPlayer();
+      await _audioPlayer!.play(DeviceFileSource(path));
+      if (mounted) setState(() { _isPreviewingCommentVoice = true; _commentVoiceLoading = false; });
+      _audioPlayer!.onPlayerComplete.first.then((_) {
+        if (mounted) setState(() => _isPreviewingCommentVoice = false);
+      });
+    } catch (e) {
+      if (mounted) { setState(() { _commentVoiceLoading = false; _isPreviewingCommentVoice = false; }); AppToast.error(context, message: '播放失败'); }
+    }
+  }
+
+  Future<void> _playCommentVoice(String url) async {
+    final voiceUrl = url.startsWith('http') ? url : fullUrl(url);
+    if (_playingCommentVoiceIdx >= 0) {
+      await _audioPlayer?.stop();
+      setState(() { _playingCommentVoiceIdx = -1; _commentVoiceLoading = false; });
+      return;
+    }
+    setState(() { _playingCommentVoiceIdx = url.hashCode; _commentVoiceLoading = true; });
+    try {
+      await _audioPlayer?.play(UrlSource(voiceUrl));
+      if (mounted) setState(() => _commentVoiceLoading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() { _playingCommentVoiceIdx = -1; _commentVoiceLoading = false; });
+        AppToast.error(context, message: '播放失败');
+      }
     }
   }
 
@@ -500,45 +640,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     );
   }
 
-  void _showEmojiPicker() {
-    const emojis = ['😀','😂','🥰','😍','🤩','😘','😜','🤗','😎','🤔','😅','😊','🙄','😏','😴','😭','🥺','😤','🤯','😱','👍','👎','👏','🙌','💪','🤝','🎉','💕','❤️','🔥','⭐','✨','💯','✅','❌','💬','🤣','😇','🙃','🫠'];
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black38,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-        ),
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).padding.bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 32, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
-          const Padding(padding: EdgeInsets.all(12), child: Text('表情', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF333333)))),
-          SizedBox(
-            height: 220,
-            child: GridView.count(
-              crossAxisCount: 8,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              childAspectRatio: 1,
-              children: emojis.map((e) => GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _commentCtrl.text = '${_commentCtrl.text}$e';
-                  _commentCtrl.selection = TextSelection.collapsed(offset: _commentCtrl.text.length);
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _commentFocusNode.requestFocus();
-                  });
-                },
-                child: Center(child: Text(e, style: const TextStyle(fontSize: 22))),
-              )).toList(),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
+
 
   void _showCommentActionSheet(Comment c) {
     _dismissKeyboard();
@@ -895,7 +997,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     if (_post == null) return const SizedBox.shrink();
     final a = fullUrl(_post!.avatar);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Row(children: [
         GestureDetector(
           onTap: () {
@@ -939,7 +1041,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   Widget _title() {
     if (_post == null || _post!.title.isEmpty) return const SizedBox.shrink();
-    return Padding(padding: const EdgeInsets.fromLTRB(12, 4, 12, 0), child: Text(_post!.title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222), height: 1.5)));
+    return Padding(padding: const EdgeInsets.fromLTRB(12, 2, 12, 0), child: Text(_post!.title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222), height: 1.5)));
   }
 
   Widget _content() {
@@ -948,13 +1050,15 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     List<Widget> ch = [];
     if (_post!.contentBlocks.isNotEmpty) {
       for (int i = 0; i < _post!.contentBlocks.length; i++) {
-        ch.add(_block(_post!.contentBlocks[i], i));
+        try {
+          ch.add(_block(_post!.contentBlocks[i], i));
+        } catch (_) {}
       }
     } else {
       if (_post!.content.isNotEmpty) ch.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _buildLinkableText(_post!.content, style: const TextStyle(fontSize: 15, color: Color(0xFF333333), height: 2.0))));
       if (_post!.images.isNotEmpty) {
-        final u = _post!.images.map((e) => e.url).where((x) => x.isNotEmpty).toList();
-        if (u.isNotEmpty) ch.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _imgLayout(u, u.length == 1 ? 'full' : 'grid', -1)));
+        final imgs = _post!.images.where((x) => x.url.isNotEmpty).toList();
+        if (imgs.isNotEmpty) ch.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _imgLayout(imgs, imgs.length == 1 ? 'full' : 'grid', -1)));
       }
       if (_post!.voiceUrl.isNotEmpty) ch.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _voiceBlock(0, _post!.voiceDuration, _post!.voiceUrl)));
       if (_post!.link.isNotEmpty) ch.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _linkBoxWidget(_post!.link)));
@@ -966,13 +1070,9 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     if (b.type == 'text' && b.content.isNotEmpty) {
       return Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _buildLinkableText(b.content, style: const TextStyle(fontSize: 15, color: Color(0xFF333333), height: 2.0)));
     }
-    if (b.type == 'images') {
-      final u = b.images.map((e) => e['url'] as String? ?? '').where((x) => x.isNotEmpty).toList();
-      if (u.isNotEmpty) return Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _imgLayout(u, b.layout.isEmpty ? 'grid' : b.layout, blockIdx));
-    }
-    if (b.type == 'image') {
-      final u = b.images.map((e) => e['url'] as String? ?? '').where((x) => x.isNotEmpty).toList();
-      if (u.isNotEmpty) return Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _imgLayout(u, b.layout.isEmpty ? 'grid' : b.layout, blockIdx));
+    if (b.type == 'images' || b.type == 'image') {
+      final imgs = b.images.map((e) => PostImage.fromJson(e)).where((x) => x.url.isNotEmpty).toList();
+      if (imgs.isNotEmpty) return Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _imgLayout(imgs, b.layout.isEmpty ? 'grid' : b.layout, blockIdx));
     }
     if (b.type == 'voice') {
       return Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: _voiceBlock(blockIdx, b.duration, b.url));
@@ -1041,27 +1141,234 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     );
   }
 
-  Widget _imgLayout(List<String> u, String l, int blockIdx) {
-    if (u.isEmpty) return const SizedBox.shrink();
-    if (l == 'full' || u.length == 1) {
-      return Column(children: u.asMap().entries.map((e) => GestureDetector(
-        onTap: () => _openGallery(u, e.key),
-        child: Padding(padding: const EdgeInsets.only(bottom: 4), child: ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(e.value), width: double.infinity, fit: BoxFit.cover))),
-      )).toList());
+  Widget _imgLayout(List<PostImage> imgs, String l, int blockIdx) {
+    if (imgs.isEmpty) return const SizedBox.shrink();
+    final urls = imgs.map((e) => e.url).toList();
+    if (l == 'full' || imgs.length == 1) {
+      return Column(children: imgs.asMap().entries.map((e) => _livePhotoWrapper(e.value, urls, e.key, isFull: true)).toList());
     }
     if (l == 'double') {
-      return Wrap(spacing: 3, runSpacing: 3, children: u.asMap().entries.map((e) => GestureDetector(
-        onTap: () => _openGallery(u, e.key),
-        child: FractionallySizedBox(widthFactor: 0.495, child: AspectRatio(aspectRatio: 1, child: ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(e.value), fit: BoxFit.cover)))),
-      )).toList());
+      return Wrap(spacing: 3, runSpacing: 3, children: imgs.asMap().entries.map((e) => _livePhotoWrapper(e.value, urls, e.key, isDouble: true)).toList());
     }
-    if (l == 'stack') return _stackLayout(u, blockIdx);
+    if (l == 'stack') return _stackLayout(urls, blockIdx);
     final w = MediaQuery.of(context).size.width - 24;
     final s = (w - 6) / 3;
-    return Wrap(spacing: 3, runSpacing: 3, children: u.asMap().entries.take(9).map((e) => GestureDetector(
-      onTap: () => _openGallery(u, e.key),
-      child: ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(e.value), width: s, height: s, fit: BoxFit.cover)),
-    )).toList());
+    return Wrap(spacing: 3, runSpacing: 3, children: imgs.asMap().entries.take(9).map((e) => _livePhotoWrapper(e.value, urls, e.key, gridSize: s)).toList());
+  }
+
+  Widget _livePhotoWrapper(PostImage img, List<String> allUrls, int index, {bool isFull = false, bool isDouble = false, double? gridSize}) {
+    final isLive = img.videoUrl.isNotEmpty;
+    final ratio = img.ratio > 0 ? img.ratio : 1.2;
+    final isPlaying = _livePhotoPlaying && _livePhotoUrl == img.videoUrl;
+    Widget imageWidget;
+    if (isFull) {
+      final w = MediaQuery.of(context).size.width - 24;
+      imageWidget = ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: w, height: w / ratio, fit: BoxFit.cover));
+    } else if (isDouble) {
+      imageWidget = FractionallySizedBox(widthFactor: 0.495, child: AspectRatio(aspectRatio: 1, child: ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), fit: BoxFit.cover))));
+    } else if (gridSize != null) {
+      imageWidget = ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: gridSize, height: gridSize, fit: BoxFit.cover));
+    } else {
+      imageWidget = ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), fit: BoxFit.cover));
+    }
+
+    if (!isLive) {
+      return GestureDetector(
+        onTap: () => _openGallery(allUrls, index),
+        onLongPress: () => _showImageSaveDialog(img.url),
+        child: isFull ? Padding(padding: const EdgeInsets.only(bottom: 4), child: imageWidget) : imageWidget,
+      );
+    }
+
+    Widget videoOverlay = const SizedBox.shrink();
+    if (isPlaying && _livePhotoCtrl != null && _livePhotoCtrl!.value.isInitialized) {
+      videoOverlay = ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: _livePhotoCtrl!.value.size.width,
+            height: _livePhotoCtrl!.value.size.height,
+            child: VideoPlayer(_livePhotoCtrl!),
+          ),
+        ),
+      );
+    }
+
+    if (isFull) {
+      final w = MediaQuery.of(context).size.width - 24;
+      return GestureDetector(
+        onTap: () {
+          if (isPlaying) {
+            _stopLivePhoto();
+          } else {
+            _openGallery(allUrls, index, liveVideoUrl: img.videoUrl);
+          }
+        },
+        onLongPress: () => _showImageSaveDialog(img.url),
+        child: Padding(padding: const EdgeInsets.only(bottom: 4), child: SizedBox(
+          width: w,
+          height: w / ratio,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              imageWidget,
+              if (isPlaying) videoOverlay,
+              Positioned(left: 8, bottom: 8, child: GestureDetector(
+                onTap: () {
+                  if (isPlaying) _stopLivePhoto();
+                  else _playLivePhoto(img.videoUrl);
+                },
+                child: _liveBadge(),
+              )),
+            ],
+          ),
+        )),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (isPlaying) {
+          _stopLivePhoto();
+        } else {
+          _openGallery(allUrls, index, liveVideoUrl: img.videoUrl);
+        }
+      },
+      onLongPress: () => _showImageSaveDialog(img.url),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          imageWidget,
+          if (isPlaying) videoOverlay,
+          Positioned(left: 4, bottom: 4, child: GestureDetector(
+            onTap: () {
+              if (isPlaying) _stopLivePhoto();
+              else _playLivePhoto(img.videoUrl);
+            },
+            child: _liveBadge(small: true),
+          )),
+        ],
+      ),
+    );
+  }
+
+  void _showImageSaveDialog(String imageUrl) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 32, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(children: [
+              Expanded(child: _actionItem(Icons.save_alt, '保存图片', const Color(0xFF333333), () {
+                Navigator.pop(ctx);
+                _saveImage(imageUrl);
+              })),
+            ]),
+          ),
+          const Divider(height: 0.5, color: Color(0xFFF0F0F0)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.pop(ctx),
+            child: Container(
+              width: double.infinity,
+              height: 50,
+              alignment: Alignment.center,
+              child: const Text('取消', style: TextStyle(fontSize: 16, color: Color(0xFF666666), fontWeight: FontWeight.w500)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _saveImage(String imageUrl) async {
+    if (_isSavingImage) return;
+    setState(() => _isSavingImage = true);
+    _showActionLoading();
+    try {
+      final url = fullUrl(imageUrl);
+      final response = await Dio().get(url, options: Options(responseType: ResponseType.bytes));
+      final dir = await getTemporaryDirectory();
+      final filePath = '${dir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final file = File(filePath);
+      await file.writeAsBytes(Uint8List.fromList(response.data));
+      await Gal.putImage(filePath, album: '留笔');
+      _dismissActionLoading();
+      if (mounted) {
+        AppToast.success(context, message: '已保存到相册');
+      }
+      try { await file.delete(); } catch (_) {}
+    } catch (e) {
+      _dismissActionLoading();
+      if (mounted) AppToast.error(context, message: '保存失败');
+    } finally {
+      if (mounted) setState(() => _isSavingImage = false);
+    }
+  }
+
+  Widget _liveBadge({bool small = false}) {
+    final isPlaying = _livePhotoPlaying;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: small ? 4 : 6, vertical: small ? 2 : 3),
+      decoration: BoxDecoration(
+        color: isPlaying
+            ? const Color(0xFFFF2442).withValues(alpha: 0.9)
+            : Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(small ? 3 : 4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset('assets/icons/icon_live_photo.png', width: small ? 10 : 14, height: small ? 10 : 14, color: isPlaying ? Colors.white : null),
+          SizedBox(width: small ? 2 : 3),
+          Text('LIVE', style: TextStyle(fontSize: small ? 8 : 10, color: isPlaying ? Colors.white : const Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  void _playLivePhoto(String videoUrl) async {
+    if (_livePhotoPlaying) return;
+    _stopLivePhoto();
+    _livePhotoCtrl = VideoPlayerController.networkUrl(Uri.parse(fullUrl(videoUrl)));
+    try {
+      await _livePhotoCtrl!.initialize();
+      _livePhotoCtrl!.setLooping(false);
+      _livePhotoCtrl!.addListener(_onLivePhotoEnd);
+      _livePhotoCtrl!.play();
+      _livePhotoUrl = videoUrl;
+      setState(() => _livePhotoPlaying = true);
+    } catch (_) {
+      _livePhotoCtrl?.dispose();
+      _livePhotoCtrl = null;
+    }
+  }
+
+  void _onLivePhotoEnd() {
+    if (_livePhotoCtrl != null && !_livePhotoCtrl!.value.isPlaying && _livePhotoCtrl!.value.position >= _livePhotoCtrl!.value.duration) {
+      _stopLivePhoto();
+    }
+  }
+
+  void _stopLivePhoto() {
+    _livePhotoCtrl?.removeListener(_onLivePhotoEnd);
+    _livePhotoCtrl?.pause();
+    _livePhotoCtrl?.dispose();
+    _livePhotoCtrl = null;
+    _livePhotoUrl = null;
+    if (_livePhotoPlaying && mounted) {
+      setState(() => _livePhotoPlaying = false);
+    }
   }
 
   Widget _stackLayout(List<String> u, int blockIdx) {
@@ -1149,8 +1456,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     );
   }
 
+  static final _emojiRegexp = RegExp(r'\[emoji:([^\]]+)\]');
+
   Widget _buildLinkableText(String text, {TextStyle? style, TextAlign? textAlign}) {
-    final matches = _urlRegex.allMatches(text).toList();
+    final urlMatches = _urlRegex.allMatches(text).toList();
+    final emojiMatches = _emojiRegexp.allMatches(text).toList();
     final contextMenuBuilder = (_, EditableTextState editableTextState) {
       final List<ContextMenuButtonItem> items = editableTextState.contextMenuButtonItems.map((item) {
         if (item.type == ContextMenuButtonType.copy) {
@@ -1168,26 +1478,52 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       }).toList();
       return AdaptiveTextSelectionToolbar.buttonItems(buttonItems: items, anchors: editableTextState.contextMenuAnchors);
     };
-    if (matches.isEmpty) {
+
+    if (urlMatches.isEmpty && emojiMatches.isEmpty) {
       return SelectableText(text, style: style, textAlign: textAlign, contextMenuBuilder: contextMenuBuilder);
     }
-    final spans = <TextSpan>[];
+
+    final allMatches = <_TextMatch>[];
+    for (final m in urlMatches) {
+      allMatches.add(_TextMatch(m.start, m.end, _TextMatchType.url, m.group(0)!));
+    }
+    for (final m in emojiMatches) {
+      allMatches.add(_TextMatch(m.start, m.end, _TextMatchType.emoji, m.group(1)!));
+    }
+    allMatches.sort((a, b) => a.start.compareTo(b.start));
+
+    final spans = <InlineSpan>[];
     int lastEnd = 0;
-    for (final m in matches) {
+    for (final m in allMatches) {
+      if (m.start < lastEnd) continue;
       if (m.start > lastEnd) {
         spans.add(TextSpan(text: text.substring(lastEnd, m.start), style: style));
       }
-      final url = m.group(0)!;
-      spans.add(TextSpan(
-        text: url,
-        style: style?.copyWith(color: const Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: const Color(0xFFFF2442)) ?? const TextStyle(color: Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: Color(0xFFFF2442)),
-        recognizer: TapGestureRecognizer()..onTap = () => Navigator.pushNamed(context, '/browser', arguments: {'url': url}),
-      ));
+      if (m.type == _TextMatchType.url) {
+        spans.add(TextSpan(
+          text: m.value,
+          style: style?.copyWith(color: const Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: const Color(0xFFFF2442)) ?? const TextStyle(color: Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: Color(0xFFFF2442)),
+          recognizer: TapGestureRecognizer()..onTap = () => Navigator.pushNamed(context, '/browser', arguments: {'url': m.value}),
+        ));
+      } else {
+        final assetPath = 'assets/emojis/${m.value}';
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Image.asset(
+            assetPath,
+            width: 22,
+            height: 22,
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => const SizedBox(width: 22, height: 22),
+          ),
+        ));
+      }
       lastEnd = m.end;
     }
     if (lastEnd < text.length) {
       spans.add(TextSpan(text: text.substring(lastEnd), style: style));
     }
+
     return SelectableText.rich(
       TextSpan(children: spans, style: style),
       textAlign: textAlign,
@@ -1262,8 +1598,29 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                 if (isA) ...[ const SizedBox(width: 4), Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(3)), child: const Text('作者', style: TextStyle(fontSize: 9, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)))],
                 if (c.isPinned == 1) ...[ const SizedBox(width: 6), Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(3)), child: const Text('置顶', style: TextStyle(fontSize: 9, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)))],
               ]),
-              const SizedBox(height: 4),
-              Text(c.content, style: const TextStyle(fontSize: 14, color: Color(0xFF333333), height: 1.7)),
+              if (c.content.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                buildEmojiRichText(c.content, style: const TextStyle(fontSize: 14, color: Color(0xFF333333), height: 1.7)),
+              ],
+              if (c.voiceUrl.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => _playCommentVoice(c.voiceUrl),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(16)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      _commentVoiceLoading && _playingCommentVoiceIdx == c.voiceUrl.hashCode
+                          ? const CupertinoActivityIndicator(radius: 8, color: Color(0xFFFF2442))
+                          : Icon(_playingCommentVoiceIdx == c.voiceUrl.hashCode ? Icons.pause_circle : Icons.play_circle, size: 20, color: const Color(0xFFFF2442)),
+                      const SizedBox(width: 4),
+                      ...List.generate(15, (i) => Container(width: 2, height: 4 + (i % 4) * 2.0, margin: const EdgeInsets.only(right: 1.5), decoration: BoxDecoration(color: const Color(0xFFFF2442).withValues(alpha: 0.4), borderRadius: BorderRadius.circular(1)))),
+                      const SizedBox(width: 6),
+                      Text('${c.voiceDuration}s', style: const TextStyle(fontSize: 11, color: Color(0xFF999999))),
+                    ]),
+                  ),
+                ),
+              ],
               if (c.imageUrl.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 GestureDetector(
@@ -1353,10 +1710,34 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                       if (isA) ...[ const SizedBox(width: 4), Container(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5), decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(2)), child: const Text('作者', style: TextStyle(fontSize: 8, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)))],
                     ]),
                     const SizedBox(height: 2),
-                    RichText(text: TextSpan(style: const TextStyle(fontSize: 13, color: Color(0xFF333333), height: 1.5), children: [
-                      TextSpan(text: '回复 ${parent.nickname}：', style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
-                      TextSpan(text: s.content),
-                    ])),
+                    if (s.content.isNotEmpty)
+                      RichText(text: TextSpan(style: const TextStyle(fontSize: 13, color: Color(0xFF333333), height: 1.5), children: [
+                        TextSpan(text: '回复 ${parent.nickname}：', style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                        buildEmojiTextSpan(s.content, style: const TextStyle(fontSize: 13, color: Color(0xFF333333)), emojiSize: 18),
+                      ]))
+                    else
+                      RichText(text: TextSpan(style: const TextStyle(fontSize: 13, color: Color(0xFF333333), height: 1.5), children: [
+                        TextSpan(text: '回复 ${parent.nickname}', style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                      ])),
+                    if (s.voiceUrl.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      GestureDetector(
+                        onTap: () => _playCommentVoice(s.voiceUrl),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(12)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            _commentVoiceLoading && _playingCommentVoiceIdx == s.voiceUrl.hashCode
+                                ? const CupertinoActivityIndicator(radius: 6, color: Color(0xFFFF2442))
+                                : Icon(_playingCommentVoiceIdx == s.voiceUrl.hashCode ? Icons.pause_circle : Icons.play_circle, size: 16, color: const Color(0xFFFF2442)),
+                            const SizedBox(width: 3),
+                            ...List.generate(12, (i) => Container(width: 2, height: 3 + (i % 4) * 1.5, margin: const EdgeInsets.only(right: 1), decoration: BoxDecoration(color: const Color(0xFFFF2442).withValues(alpha: 0.4), borderRadius: BorderRadius.circular(1)))),
+                            const SizedBox(width: 4),
+                            Text('${s.voiceDuration}s', style: const TextStyle(fontSize: 10, color: Color(0xFF999999))),
+                          ]),
+                        ),
+                      ),
+                    ],
                     if (s.imageUrl.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       ClipRRect(borderRadius: BorderRadius.circular(6), child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 140), child: CachedNetworkImage(imageUrl: fullUrl(s.imageUrl), width: 100, fit: BoxFit.cover))),
@@ -1551,12 +1932,13 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             color: const Color(0xFFF5F5F5),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: TextField(
+          child: ExtendedTextField(
             controller: _commentCtrl,
             focusNode: _commentFocusNode,
             autofocus: true,
             maxLines: null,
             expands: true,
+            specialTextSpanBuilder: CommentEmojiSpanBuilder(),
             textAlignVertical: TextAlignVertical.top,
             textInputAction: TextInputAction.newline,
             style: const TextStyle(fontSize: 15, height: 1.5),
@@ -1569,6 +1951,39 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             onChanged: _onCommentTextChanged,
           ),
         ),
+        if (_isCommentRecording)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(8)),
+              child: Row(children: [
+                Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFFF2442), shape: BoxShape.circle)),
+                const SizedBox(width: 8),
+                Text('正在录制 ${_commentRecordSeconds}s', style: const TextStyle(fontSize: 13, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)),
+              ]),
+            ),
+          ),
+        if (_commentVoicePath != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(8)),
+              child: Row(children: [
+                GestureDetector(
+                  onTap: () => _previewCommentVoice(_commentVoicePath!),
+                  child: _commentVoiceLoading
+                      ? const SizedBox(width: 20, height: 20, child: CupertinoActivityIndicator(radius: 8, color: Color(0xFFFF2442)))
+                      : Icon(_isPreviewingCommentVoice ? Icons.pause_circle : Icons.play_circle, size: 20, color: const Color(0xFFFF2442)),
+                ),
+                const SizedBox(width: 8),
+                Text('${_commentVoiceDuration}s', style: const TextStyle(fontSize: 13, color: Color(0xFF333333))),
+                const Spacer(),
+                GestureDetector(onTap: _removeCommentVoice, child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
+              ]),
+            ),
+          ),
         if (_commentImages.isNotEmpty || _imageUploading)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -1601,18 +2016,40 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
           ),
         const SizedBox(height: 6),
         Row(children: [
-          GestureDetector(onTap: _pickCommentImage, child: const Icon(Icons.image_outlined, size: 24, color: Color(0xFF666666))),
-          const SizedBox(width: 22),
-          GestureDetector(onTap: () {}, child: const Icon(Icons.mic_none_outlined, size: 24, color: Color(0xFF666666))),
-          const SizedBox(width: 22),
-          GestureDetector(onTap: _showMentionPicker, child: const Icon(Icons.alternate_email, size: 24, color: Color(0xFF666666))),
-          const SizedBox(width: 22),
-          GestureDetector(onTap: _showEmojiPicker, child: const Icon(Icons.emoji_emotions_outlined, size: 24, color: Color(0xFF666666))),
+          GestureDetector(onTap: _pickCommentImage, behavior: HitTestBehavior.opaque, child: Container(width: 44, height: 44, alignment: Alignment.center, child: const Icon(Icons.image_outlined, size: 24, color: Color(0xFF666666)))),
+          const SizedBox(width: 12),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (_isCommentRecording) {
+                _stopCommentRecording();
+              } else {
+                _startCommentRecording();
+              }
+            },
+            child: Container(width: 44, height: 44, alignment: Alignment.center, child: Icon(_isCommentRecording ? Icons.stop_circle : Icons.mic_none_outlined, size: 24, color: _isCommentRecording ? const Color(0xFFFF2442) : const Color(0xFF666666))),
+          ),
+          const SizedBox(width: 12),
+          GestureDetector(onTap: _showMentionPicker, behavior: HitTestBehavior.opaque, child: Container(width: 44, height: 44, alignment: Alignment.center, child: const Icon(Icons.alternate_email, size: 24, color: Color(0xFF666666)))),
+          const SizedBox(width: 12),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (_showCommentEmojiPanel) {
+                setState(() => _showCommentEmojiPanel = false);
+                _commentFocusNode.requestFocus();
+              } else {
+                _commentFocusNode.unfocus();
+                setState(() => _showCommentEmojiPanel = true);
+              }
+            },
+            child: Container(width: 44, height: 44, alignment: Alignment.center, child: Icon(_showCommentEmojiPanel ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, size: 24, color: const Color(0xFF666666))),
+          ),
           const Spacer(),
           ValueListenableBuilder<String>(
             valueListenable: _inputText,
             builder: (_, text, __) {
-              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty;
+              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty || _commentVoicePath != null;
               if (!canSend) return const SizedBox.shrink();
               return GestureDetector(
                 onTap: _isSubmitting ? null : _submitComment,
@@ -1630,8 +2067,77 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             },
           ),
         ]),
+        if (_showCommentEmojiPanel)
+          Container(
+            height: 220,
+            color: const Color(0xFFF5F5F5),
+            child: GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 8, childAspectRatio: 1),
+              itemCount: emojiAssets.length,
+              itemBuilder: (ctx, i) => GestureDetector(
+                onTap: () {
+                  _commentEmojiInserting = true;
+                  final filename = emojiAssets[i].split('/').last;
+                  final marker = '[emoji:$filename]';
+                  final text = _commentCtrl.text;
+                  final cursorPos = _commentCtrl.selection.start;
+                  final insertPos = cursorPos < 0 ? text.length : cursorPos;
+                  _commentCtrl.text = text.substring(0, insertPos) + marker + text.substring(insertPos);
+                  _commentCtrl.selection = TextSelection.collapsed(offset: insertPos + marker.length);
+                  _onCommentTextChanged(_commentCtrl.text);
+                  Future.microtask(() => _commentEmojiInserting = false);
+                },
+                child: Padding(padding: const EdgeInsets.all(4), child: Image.asset(emojiAssets[i], fit: BoxFit.contain)),
+              ),
+            ),
+          ),
       ]),
     );
+  }
+}
+
+enum _TextMatchType { url, emoji }
+
+class _TextMatch {
+  final int start;
+  final int end;
+  final _TextMatchType type;
+  final String value;
+  _TextMatch(this.start, this.end, this.type, this.value);
+}
+
+class CommentEmojiText extends SpecialText {
+  static const String flag = '[emoji:';
+  final int startIndex;
+
+  CommentEmojiText(TextStyle? textStyle, {SpecialTextGestureTapCallback? onTap, required this.startIndex})
+      : super(flag, ']', textStyle, onTap: onTap);
+
+  @override
+  InlineSpan finishText() {
+    final key = getContent();
+    final assetPath = 'assets/emojis/$key';
+    return ImageSpan(
+      AssetImage(assetPath),
+      actualText: toString(),
+      start: startIndex,
+      imageWidth: 22,
+      imageHeight: 22,
+      fit: BoxFit.contain,
+      alignment: PlaceholderAlignment.middle,
+    );
+  }
+}
+
+class CommentEmojiSpanBuilder extends SpecialTextSpanBuilder {
+  @override
+  SpecialText? createSpecialText(String flag, {TextStyle? textStyle, SpecialTextGestureTapCallback? onTap, int? index}) {
+    if (isStart(flag, CommentEmojiText.flag)) {
+      final startIndex = (index ?? 0) - CommentEmojiText.flag.length + 1;
+      return CommentEmojiText(textStyle, onTap: onTap, startIndex: startIndex);
+    }
+    return null;
   }
 }
 

@@ -19,15 +19,19 @@ class ContentBlock {
     final rawImages = json['images'];
     List<Map<String, dynamic>> parsedImages = [];
     if (rawImages is List) {
-      parsedImages = rawImages.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      for (final e in rawImages) {
+        if (e is Map) {
+          parsedImages.add(Map<String, dynamic>.from(e));
+        }
+      }
     }
     return ContentBlock(
-      type: json['type'] ?? '',
-      content: json['content'] ?? '',
+      type: (json['type'] ?? '').toString(),
+      content: (json['content'] ?? '').toString(),
       images: parsedImages,
-      layout: json['layout'] ?? '',
-      url: json['url'] ?? '',
-      duration: json['duration'] ?? 0,
+      layout: (json['layout'] ?? '').toString(),
+      url: (json['url'] ?? '').toString(),
+      duration: json['duration'] is int ? json['duration'] as int : 0,
     );
   }
 
@@ -57,13 +61,20 @@ class PostImage {
   });
 
   factory PostImage.fromJson(Map<String, dynamic> json) {
+    final rawUrl = json['url'];
+    final rawType = json['type'] ?? json['media_type'];
+    final rawVideoUrl = json['video_url'] ?? json['videoUrl'];
+    final rawRatio = json['ratio'];
+    double parseRatio(dynamic v) {
+      if (v is int) return v.toDouble();
+      if (v is double) return v;
+      return 1.2;
+    }
     return PostImage(
-      url: json['url'] ?? '',
-      mediaType: json['type'] ?? json['media_type'] ?? 'image',
-      videoUrl: json['video_url'] ?? json['videoUrl'] ?? '',
-      ratio: (json['ratio'] ?? 1.2) is int
-          ? (json['ratio'] as int).toDouble()
-          : (json['ratio'] ?? 1.2) as double,
+      url: rawUrl is String ? rawUrl : (rawUrl?.toString() ?? ''),
+      mediaType: rawType is String ? rawType : (rawType?.toString() ?? 'image'),
+      videoUrl: rawVideoUrl is String ? rawVideoUrl : (rawVideoUrl?.toString() ?? ''),
+      ratio: parseRatio(rawRatio),
     );
   }
 
@@ -146,13 +157,21 @@ class Post {
     List<ContentBlock> blocks = [];
     final rawBlocks = json['content_blocks'];
     if (rawBlocks is List) {
-      blocks = rawBlocks.map((e) => ContentBlock.fromJson(e as Map<String, dynamic>)).toList();
+      for (final e in rawBlocks) {
+        try {
+          if (e is Map) blocks.add(ContentBlock.fromJson(Map<String, dynamic>.from(e)));
+        } catch (_) {}
+      }
     }
 
     List<PostImage> imgs = [];
     final rawImgs = json['images'];
     if (rawImgs is List) {
-      imgs = rawImgs.map((e) => PostImage.fromJson(e as Map<String, dynamic>)).toList();
+      for (final e in rawImgs) {
+        try {
+          if (e is Map) imgs.add(PostImage.fromJson(Map<String, dynamic>.from(e)));
+        } catch (_) {}
+      }
     }
 
     return Post(

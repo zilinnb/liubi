@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
 import '../widgets/app_toast.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
@@ -10,44 +11,41 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_player/video_player.dart';
 import '../models/post.dart';
 import '../providers/post_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/helpers.dart';
+import '../utils/image_picker_util.dart';
+import '../utils/emoji_assets.dart';
+import 'package:extended_text_field/extended_text_field.dart';
 
-enum _BlockType { text, image, voice, link }
-
-class _ContentBlock {
-  _BlockType type;
+class _EditorItem {
+  String type;
   String text;
   List<String> imagePaths;
+  List<Uint8List> imageThumbs;
   List<String> existingUrls;
+  List<String> liveVideoPaths;
+  List<String> existingLiveVideoUrls;
   String imageLayout;
   String? voicePath;
   int voiceDuration;
   String linkUrl;
-  TextEditingController? _textCtrl;
-  TextEditingController? _linkCtrl;
 
-  _ContentBlock({required this.type, this.text = '', this.imagePaths = const [], this.existingUrls = const [], this.imageLayout = 'grid', this.voicePath, this.voiceDuration = 0, this.linkUrl = ''}) {
-    if (type == _BlockType.text) _textCtrl = TextEditingController(text: text);
-    if (type == _BlockType.link) _linkCtrl = TextEditingController(text: linkUrl);
-  }
-
-  TextEditingController get textCtrl {
-    _textCtrl ??= TextEditingController(text: text);
-    return _textCtrl!;
-  }
-
-  TextEditingController get linkCtrl {
-    _linkCtrl ??= TextEditingController(text: linkUrl);
-    return _linkCtrl!;
-  }
-
-  void dispose() {
-    _textCtrl?.dispose();
-    _linkCtrl?.dispose();
-  }
+  _EditorItem({
+    required this.type,
+    this.text = '',
+    this.imagePaths = const [],
+    this.imageThumbs = const [],
+    this.existingUrls = const [],
+    this.liveVideoPaths = const [],
+    this.existingLiveVideoUrls = const [],
+    this.imageLayout = 'grid',
+    this.voicePath,
+    this.voiceDuration = 0,
+    this.linkUrl = '',
+  });
 }
 
 class PublishScreen extends StatefulWidget {
@@ -61,7 +59,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   final _titleCtrl = TextEditingController();
   String? _selectedCategoryId;
   String? _selectedCategoryName;
-  final List<_ContentBlock> _blocks = [_ContentBlock(type: _BlockType.text)];
+  final List<_EditorItem> _items = [_EditorItem(type: 'text')];
   bool _publishing = false;
   int? _editingPostId;
 
@@ -69,19 +67,23 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   bool _isRecording = false;
   int _recordSeconds = 0;
   Timer? _recordTimer;
-  int? _recordingBlockIdx;
+  int? _recordingItemIdx;
   AudioPlayer? _previewPlayer;
   int _playingVoiceIdx = -1;
   bool _voiceLoading = false;
 
-  late AnimationController _overlayCtrl;
-  late Animation<Offset> _slideAnim;
-  late Animation<double> _fadeAnim;
-  _OverlayType _currentOverlay = _OverlayType.none;
-
+  bool _showEmojiPanel = false;
+  bool _emojiInserting = false;
   final FocusNode _titleFocus = FocusNode();
-  final FocusNode _textFocus = FocusNode();
-  final _linkCtrl = TextEditingController();
+  final List<FocusNode> _textFocusNodes = [];
+  int _currentTextIndex = 0;
+  final Set<int> _expandedStacks = {};
+
+  VideoPlayerController? _livePhotoCtrl;
+  bool _livePhotoPlaying = false;
+  String? _livePhotoPath;
+
+  final List<TextEditingController> _textControllers = [];
 
   bool get _canPublish => _titleCtrl.text.trim().isNotEmpty && _selectedCategoryId != null;
 
@@ -89,9 +91,8 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   void initState() {
     super.initState();
     _titleCtrl.addListener(() => setState(() {}));
-    _overlayCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(CurvedAnimation(parent: _overlayCtrl, curve: Curves.easeOutCubic));
-    _fadeAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _overlayCtrl, curve: Curves.easeOut));
+    _textControllers.add(EmojiTextEditingController());
+    _textFocusNodes.add(FocusNode());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final pp = Provider.of<PostProvider>(context, listen: false);
       if (pp.categories.isEmpty) pp.fetchCategories();
@@ -108,44 +109,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
           _selectedCategoryId = routeArgs.categoryId.toString();
           _selectedCategoryName = routeArgs.categoryName;
         }
-        if (routeArgs.contentBlocks.isNotEmpty) {
-          _blocks.clear();
-          for (final cb in routeArgs.contentBlocks) {
-            if (cb.type == 'text') {
-              _blocks.add(_ContentBlock(type: _BlockType.text, text: cb.content));
-            } else if (cb.type == 'image' || cb.type == 'images') {
-              final urls = cb.images.map((e) => e['url'] as String? ?? '').where((u) => u.isNotEmpty).toList();
-              _blocks.add(_ContentBlock(type: _BlockType.image, existingUrls: urls, imageLayout: cb.layout.isNotEmpty ? cb.layout : 'grid'));
-            } else if (cb.type == 'voice') {
-              _blocks.add(_ContentBlock(type: _BlockType.voice, voicePath: cb.url, voiceDuration: cb.duration, existingUrls: cb.url.isNotEmpty ? [cb.url] : []));
-            } else if (cb.type == 'link') {
-              _blocks.add(_ContentBlock(type: _BlockType.link, linkUrl: cb.url));
-            }
-          }
-        } else {
-          if (routeArgs.content.isNotEmpty) {
-            _blocks[0].text = routeArgs.content;
-            _blocks[0].textCtrl.text = routeArgs.content;
-          }
-          if (routeArgs.images.isNotEmpty) {
-            final urls = routeArgs.images.map((e) => e.url).where((u) => u.isNotEmpty).toList();
-            if (urls.isNotEmpty) {
-              if (_blocks.length == 1 && _blocks[0].text.isEmpty) {
-                _blocks[0] = _ContentBlock(type: _BlockType.image, existingUrls: urls, imageLayout: 'grid');
-              } else {
-                _blocks.add(_ContentBlock(type: _BlockType.image, existingUrls: urls, imageLayout: 'grid'));
-              }
-            }
-          }
-          if (routeArgs.voiceUrl.isNotEmpty) {
-            _blocks.add(_ContentBlock(type: _BlockType.voice, voicePath: routeArgs.voiceUrl, voiceDuration: routeArgs.voiceDuration));
-          }
-          if (routeArgs.link.isNotEmpty) {
-            _blocks.add(_ContentBlock(type: _BlockType.link, linkUrl: routeArgs.link));
-          }
-        }
-        if (_blocks.isEmpty) _blocks.add(_ContentBlock(type: _BlockType.text));
-        setState(() {});
+        _loadPostContent(routeArgs);
         return;
       }
 
@@ -161,217 +125,269 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     });
   }
 
+  void _loadPostContent(Post post) {
+    _items.clear();
+    _textControllers.clear();
+    _textFocusNodes.clear();
+
+    if (post.contentBlocks.isNotEmpty) {
+      for (final cb in post.contentBlocks) {
+        if (cb.type == 'text') {
+          _items.add(_EditorItem(type: 'text', text: cb.content));
+          _textControllers.add(EmojiTextEditingController(text: cb.content));
+          _textFocusNodes.add(FocusNode());
+        } else if (cb.type == 'image' || cb.type == 'images') {
+          final urls = cb.images.map((e) => e['url'] as String? ?? '').where((u) => u.isNotEmpty).toList();
+          _items.add(_EditorItem(type: 'image', existingUrls: urls, imageLayout: cb.layout.isNotEmpty ? cb.layout : 'grid'));
+        } else if (cb.type == 'voice') {
+          _items.add(_EditorItem(type: 'voice', voicePath: cb.url, voiceDuration: cb.duration));
+        } else if (cb.type == 'link') {
+          _items.add(_EditorItem(type: 'link', linkUrl: cb.url));
+          _textControllers.add(TextEditingController(text: cb.url));
+          _textFocusNodes.add(FocusNode());
+        }
+      }
+    } else {
+      if (post.content.isNotEmpty) {
+        _items.add(_EditorItem(type: 'text', text: post.content));
+        _textControllers[0].text = post.content;
+      }
+      if (post.images.isNotEmpty) {
+        final urls = post.images.map((e) => e.url).where((u) => u.isNotEmpty).toList();
+        _items.add(_EditorItem(type: 'image', existingUrls: urls, imageLayout: 'grid'));
+      }
+      if (post.voiceUrl.isNotEmpty) {
+        _items.add(_EditorItem(type: 'voice', voicePath: post.voiceUrl, voiceDuration: post.voiceDuration));
+      }
+      if (post.link.isNotEmpty) {
+        _items.add(_EditorItem(type: 'link', linkUrl: post.link));
+      }
+    }
+
+    if (_items.isEmpty || _items.every((i) => i.type == 'text' && i.text.isEmpty)) {
+      _items.clear();
+      _textControllers.clear();
+      _textFocusNodes.clear();
+      _items.add(_EditorItem(type: 'text'));
+      _textControllers.add(EmojiTextEditingController());
+      _textFocusNodes.add(FocusNode());
+    }
+    setState(() {});
+  }
+
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _linkCtrl.dispose();
     _titleFocus.dispose();
-    _textFocus.dispose();
+    for (final c in _textControllers) c.dispose();
+    for (final f in _textFocusNodes) f.dispose();
     _recordTimer?.cancel();
     _recorder.dispose();
     _previewPlayer?.dispose();
-    _overlayCtrl.dispose();
-    for (final b in _blocks) b.dispose();
+    _livePhotoCtrl?.dispose();
     super.dispose();
   }
 
-  void _openOverlay(_OverlayType type) {
-    FocusScope.of(context).unfocus();
-    setState(() => _currentOverlay = type);
-    _overlayCtrl.forward();
-  }
+  void _insertImageAt(int index) async {
+    final result = await ImagePickerUtil.pickImages(context);
+    if (result == null || result.imagePaths.isEmpty) return;
 
-  void _closeOverlay() {
-    _overlayCtrl.reverse().then((_) {
-      if (mounted) setState(() => _currentOverlay = _OverlayType.none);
-    });
-  }
-
-  void _addTextBlock() {
-    setState(() => _blocks.add(_ContentBlock(type: _BlockType.text)));
-    Future.delayed(const Duration(milliseconds: 100), () => _textFocus.requestFocus());
-  }
-
-  void _addImageBlock() async {
-    final picker = ImagePicker();
-    final images = await picker.pickMultiImage(imageQuality: 85);
-    if (images.isEmpty) return;
-    setState(() {
-      _blocks.add(_ContentBlock(type: _BlockType.image, imagePaths: images.map((e) => e.path).toList(), imageLayout: images.length == 1 ? 'full' : 'grid'));
-      _blocks.add(_ContentBlock(type: _BlockType.text));
-    });
-  }
-
-  void _addVoiceBlock() {
-    _openOverlay(_OverlayType.voice);
-  }
-
-  void _addLinkBlock() {
-    _openOverlay(_OverlayType.link);
-  }
-
-  Future<void> _previewVoice(int idx, String path) async {
-    if (_playingVoiceIdx == idx) {
-      await _previewPlayer?.stop();
-      setState(() { _playingVoiceIdx = -1; _voiceLoading = false; });
-      return;
+    final count = result.imagePaths.length;
+    String layout;
+    if (count == 1) {
+      layout = 'full';
+    } else if (count == 2) {
+      layout = 'dual';
+    } else if (count <= 9) {
+      layout = 'grid';
+    } else {
+      layout = 'stack';
     }
-    await _previewPlayer?.stop();
-    _previewPlayer?.dispose();
-    _previewPlayer = AudioPlayer();
-    setState(() { _playingVoiceIdx = idx; _voiceLoading = true; });
-    try {
-      if (path.startsWith('http')) {
-        await _previewPlayer!.play(UrlSource(path));
+
+    setState(() {
+      _items.insert(index, _EditorItem(
+        type: 'image',
+        imagePaths: result.imagePaths,
+        imageThumbs: result.imageThumbs,
+        liveVideoPaths: result.liveVideoPaths,
+        imageLayout: layout,
+      ));
+      _textControllers.insert(index, EmojiTextEditingController());
+      _textFocusNodes.insert(index, FocusNode());
+    });
+  }
+
+  void _addImagesToItem(int idx) async {
+    final result = await ImagePickerUtil.pickImages(context);
+    if (result == null || result.imagePaths.isEmpty) return;
+
+    setState(() {
+      final item = _items[idx];
+      item.imagePaths.addAll(result.imagePaths);
+      item.imageThumbs.addAll(result.imageThumbs);
+      item.liveVideoPaths.addAll(result.liveVideoPaths);
+      final totalCount = item.imagePaths.length + item.existingUrls.length;
+      if (totalCount == 1) {
+        item.imageLayout = 'full';
+      } else if (totalCount == 2) {
+        item.imageLayout = 'dual';
+      } else if (totalCount <= 9) {
+        item.imageLayout = 'grid';
       } else {
-        await _previewPlayer!.play(DeviceFileSource(path));
+        item.imageLayout = 'stack';
       }
-      if (mounted) setState(() { _voiceLoading = false; });
-    } catch (_) {
-      if (mounted) setState(() { _playingVoiceIdx = -1; _voiceLoading = false; });
-      return;
-    }
-    _previewPlayer!.onPlayerComplete.listen((_) {
-      if (mounted) setState(() { _playingVoiceIdx = -1; _voiceLoading = false; });
     });
   }
 
-  void _removeBlock(int idx) {
-    if (_blocks.length <= 1 && _blocks[0].type == _BlockType.text) return;
-    setState(() => _blocks.removeAt(idx));
-  }
-
-  void _moveBlock(int from, int to) {
-    if (to < 0 || to >= _blocks.length) return;
+  void _insertTextAt(int index) {
     setState(() {
-      final b = _blocks.removeAt(from);
-      _blocks.insert(to, b);
+      _items.insert(index, _EditorItem(type: 'text'));
+      _textControllers.insert(index, EmojiTextEditingController());
+      _textFocusNodes.insert(index, FocusNode());
+    });
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (index < _textFocusNodes.length) {
+        _textFocusNodes[index].requestFocus();
+      }
     });
   }
 
-  Future<void> _startRecording(int blockIdx) async {
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      AppToast.error(context, message: '需要麦克风权限才能录制');
-      return;
-    }
-    try {
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/voice_record_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
-      setState(() { _isRecording = true; _recordSeconds = 0; _recordingBlockIdx = blockIdx; });
-      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() => _recordSeconds++);
-      });
-    } catch (e) {
-      AppToast.error(context, message: '录制失败: $e');
-    }
+  void _insertVoiceAt(int index) {
+    setState(() {
+      _items.insert(index, _EditorItem(type: 'voice'));
+      _textControllers.insert(index, EmojiTextEditingController());
+      _textFocusNodes.insert(index, FocusNode());
+    });
   }
 
-  Future<void> _stopRecording() async {
-    _recordTimer?.cancel();
-    _recordTimer = null;
-    try {
-      final path = await _recorder.stop();
-      if (path != null && _recordingBlockIdx != null) {
-        setState(() {
-          _blocks[_recordingBlockIdx!].voicePath = path;
-          _blocks[_recordingBlockIdx!].voiceDuration = _recordSeconds;
-        });
+  void _insertLinkAt(int index) {
+    setState(() {
+      _items.insert(index, _EditorItem(type: 'link'));
+      _textControllers.insert(index, EmojiTextEditingController());
+      _textFocusNodes.insert(index, FocusNode());
+    });
+  }
+
+  void _removeItem(int idx) {
+    setState(() {
+      if (idx < _textControllers.length) {
+        _textControllers[idx].dispose();
+        _textControllers.removeAt(idx);
       }
-    } catch (_) {}
-    setState(() { _isRecording = false; _recordSeconds = 0; _recordingBlockIdx = null; });
-  }
-
-  Future<void> _pickAudioFile(int blockIdx) async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (result != null && result.files.single.path != null) {
-      setState(() {
-        _blocks[blockIdx].voicePath = result.files.single.path;
-        _blocks[blockIdx].voiceDuration = 0;
-      });
-    }
-  }
-
-  Future<void> _doPublish() async {
-    if (_publishing) return;
-    setState(() => _publishing = true);
-
-    final pp = Provider.of<PostProvider>(context, listen: false);
-    final contentBlocks = <Map<String, dynamic>>[];
-    final allImgUrls = <String>[];
-    String? voiceUrl;
-    int? voiceDur;
-    String? linkUrl;
-
-    for (final b in _blocks) {
-      if (b.type == _BlockType.text && b.text.trim().isNotEmpty) {
-        contentBlocks.add({'type': 'text', 'content': b.text.trim()});
-      } else if (b.type == _BlockType.image) {
-        final urls = <String>[];
-        urls.addAll(b.existingUrls);
-        for (final p in b.imagePaths) {
-          final url = await pp.uploadFile(p);
-          if (url != null) urls.add(url);
-        }
-        allImgUrls.addAll(urls);
-        contentBlocks.add({'type': 'images', 'images': urls.map((u) => {'url': u, 'type': 'image'}).toList(), 'layout': b.imageLayout});
-      } else if (b.type == _BlockType.voice && b.voicePath != null) {
-        if (b.voicePath!.startsWith('http') || b.voicePath!.startsWith('/')) {
-          voiceUrl = b.voicePath;
-        } else {
-          final url = await pp.uploadFile(b.voicePath!);
-          if (url != null) voiceUrl = url;
-        }
-        voiceDur = b.voiceDuration;
-        contentBlocks.add({'type': 'voice', 'url': voiceUrl ?? '', 'duration': b.voiceDuration});
-      } else if (b.type == _BlockType.link && b.linkUrl.isNotEmpty) {
-        linkUrl = b.linkUrl;
-        contentBlocks.add({'type': 'link', 'url': b.linkUrl});
+      if (idx < _textFocusNodes.length) {
+        _textFocusNodes[idx].dispose();
+        _textFocusNodes.removeAt(idx);
       }
+      _items.removeAt(idx);
+      if (_items.isEmpty) {
+        _items.add(_EditorItem(type: 'text'));
+        _textControllers.add(EmojiTextEditingController());
+        _textFocusNodes.add(FocusNode());
+      }
+    });
+  }
+
+  void _onTextChanged(int idx, String value) {
+    _items[idx].text = value;
+  }
+
+  void _insertEmoji(String emoji) {
+    if (_currentTextIndex >= 0 && _currentTextIndex < _textControllers.length) {
+      final controller = _textControllers[_currentTextIndex];
+      final text = controller.text;
+      final selection = controller.selection;
+      final newText = text.replaceRange(selection.start, selection.end, emoji);
+      controller.text = newText;
+      controller.selection = TextSelection.collapsed(offset: selection.start + emoji.length);
+      _items[_currentTextIndex].text = newText;
     }
+  }
 
-    int postType = 0;
-    if (allImgUrls.isEmpty && voiceUrl == null) {
-      postType = 1;
-    } else if (voiceUrl != null) {
-      postType = 2;
-    }
+  void _insertGifEmoji(String assetPath) {
+    final idx = _currentTextIndex;
+    if (idx < 0 || idx >= _textControllers.length) return;
+    final controller = _textControllers[idx];
+    final filename = assetPath.split('/').last;
+    final marker = '[emoji:$filename]';
+    final text = controller.text;
 
-    final imagesData = allImgUrls.map((u) => {'url': u, 'type': 'image'}).toList();
+    _emojiInserting = true;
 
-    final data = {
-      'title': _titleCtrl.text.trim(),
-      'content': _blocks.where((b) => b.type == _BlockType.text).map((b) => b.text.trim()).join('\n'),
-      'category_id': _selectedCategoryId,
-      'post_type': postType,
-      if (postType == 1) 'text_template': 0,
-      'content_blocks': contentBlocks,
-      if (imagesData.isNotEmpty) 'images': imagesData,
-      if (voiceUrl != null) 'voice_url': voiceUrl,
-      if (voiceDur != null) 'voice_duration': voiceDur,
-      if (linkUrl != null) 'link': linkUrl,
-    };
-
-    Map<String, dynamic> res;
-    if (_editingPostId != null) {
-      res = await pp.updatePost(_editingPostId!, data);
+    int cursorPos;
+    if (_textFocusNodes[idx].hasFocus) {
+      cursorPos = controller.selection.start;
+      if (cursorPos < 0) cursorPos = text.length;
     } else {
-      res = await pp.createPost(data);
+      cursorPos = text.length;
     }
-    setState(() => _publishing = false);
 
-    if (res['code'] == 200) {
-      if (mounted) {
-        AppToast.success(context, message: _editingPostId != null ? '编辑成功' : '发布成功');
-        pp.fetchPosts(refresh: true);
-        Navigator.pop(context, true);
-      }
-    } else {
-      if (mounted) {
-        AppToast.error(context, message: res['msg'] ?? '操作失败');
-      }
-    }
+    final newText = text.substring(0, cursorPos) + marker + text.substring(cursorPos);
+    controller.text = newText;
+    controller.selection = TextSelection.collapsed(offset: cursorPos + marker.length);
+    _onTextChanged(idx, controller.text);
+
+    Future.microtask(() {
+      _emojiInserting = false;
+    });
+  }
+
+  void _showInsertMenu(int index) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('插入内容', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildInsertOption(Icons.image_outlined, '图片', const Color(0xFFE6F7FF), const Color(0xFF1890FF), () {
+                    Navigator.pop(ctx);
+                    _insertImageAt(index);
+                  }),
+                  _buildInsertOption(Icons.mic_outlined, '音频', const Color(0xFFFFF0F0), const Color(0xFFFF2442), () {
+                    Navigator.pop(ctx);
+                    _insertVoiceAt(index);
+                  }),
+                  _buildInsertOption(Icons.link_outlined, '链接', const Color(0xFFF0F5FF), const Color(0xFF1890FF), () {
+                    Navigator.pop(ctx);
+                    _insertLinkAt(index);
+                  }),
+                  _buildInsertOption(Icons.text_fields, '文字', const Color(0xFFF5F5F5), const Color(0xFF666666), () {
+                    Navigator.pop(ctx);
+                    _insertTextAt(index);
+                  }),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInsertOption(IconData icon, String label, Color bg, Color fg, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(16)),
+            child: Icon(icon, size: 24, color: fg),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF666666))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -380,14 +396,33 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
       backgroundColor: Colors.white,
       resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(children: [
-              _buildNav(),
-              Expanded(child: _buildBody()),
-              _buildKeyboardToolbar(),
-            ]),
-            if (_currentOverlay != _OverlayType.none) _buildOverlay(),
+            _buildNav(),
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() => _showEmojiPanel = false);
+                  FocusScope.of(context).unfocus();
+                },
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildTitleField(),
+                      _buildTopicRow(),
+                      const Divider(height: 1, indent: 14, endIndent: 14, color: Color(0xFFF5F5F5)),
+                      ..._buildEditorItems(),
+                      const SizedBox(height: 20),
+                      _buildAddMoreButton(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            _buildBottomToolbar(),
+            if (_showEmojiPanel) _buildEmojiPanel(),
           ],
         ),
       ),
@@ -397,30 +432,42 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   Widget _buildNav() {
     return Container(
       height: 44,
-      decoration: const BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 0.5))),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 0.5)),
+      ),
       child: Row(children: [
-        GestureDetector(onTap: () => Navigator.pop(context), child: Container(width: 56, height: 44, alignment: Alignment.center, child: const Icon(Icons.close, size: 22, color: Color(0xFF333333)))),
+        GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(width: 56, height: 44, alignment: Alignment.center, child: const Icon(Icons.close, size: 22, color: Color(0xFF333333))),
+        ),
         const Expanded(child: Center(child: Text('发布笔记', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF222222))))),
         GestureDetector(
           onTap: _canPublish && !_publishing ? _doPublish : null,
-          child: Container(width: 56, height: 44, alignment: Alignment.center, child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            decoration: BoxDecoration(color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(14)),
-            child: Text(_editingPostId != null ? '保存' : '发布', style: TextStyle(fontSize: 13, color: _canPublish ? Colors.white : const Color(0xFF999999), fontWeight: _canPublish ? FontWeight.w600 : FontWeight.w400)),
-          )),
+          child: Container(
+            width: 56,
+            height: 44,
+            alignment: Alignment.center,
+            child: _publishing
+                ? SizedBox(width: 20, height: 20, child: CupertinoActivityIndicator(radius: 10, color: Color(0xFFFF2442)))
+                : Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _editingPostId != null ? '保存' : '发布',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _canPublish ? Colors.white : const Color(0xFF999999),
+                        fontWeight: _canPublish ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+          ),
         ),
-      ]),
-    );
-  }
-
-  Widget _buildBody() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _buildTitleField(),
-        _buildTopicRow(),
-        const Divider(height: 1, indent: 14, endIndent: 14, color: Color(0xFFF5F5F5)),
-        for (int i = 0; i < _blocks.length; i++) _buildBlock(i),
+        const SizedBox(width: 8),
       ]),
     );
   }
@@ -429,338 +476,1407 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
       child: TextField(
-        controller: _titleCtrl, focusNode: _titleFocus, maxLength: 50,
+        controller: _titleCtrl,
+        focusNode: _titleFocus,
+        maxLength: 20,
         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Color(0xFF222222)),
-        decoration: const InputDecoration(hintText: '填写标题会有更多赞哦～', hintStyle: TextStyle(fontSize: 17, color: Color(0xFFCCCCCC)), border: InputBorder.none, counterText: '', contentPadding: EdgeInsets.zero),
+        decoration: const InputDecoration(
+          hintText: '填写标题会有更多赞哦～',
+          hintStyle: TextStyle(fontSize: 17, color: Color(0xFFCCCCCC)),
+          border: InputBorder.none,
+          counterText: '',
+          contentPadding: EdgeInsets.zero,
+        ),
       ),
     );
   }
 
   Widget _buildTopicRow() {
     return GestureDetector(
-      onTap: () => _openOverlay(_OverlayType.topic),
+      onTap: _showTopicPicker,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(children: [
           const Text('#', style: TextStyle(fontSize: 16, color: Color(0xFFFF2442), fontWeight: FontWeight.w700)),
           const SizedBox(width: 4),
-          Text(_selectedCategoryName ?? '选择话题', style: TextStyle(fontSize: 14, color: _selectedCategoryName != null ? const Color(0xFFFF2442) : const Color(0xFFCCCCCC), fontWeight: _selectedCategoryName != null ? FontWeight.w500 : FontWeight.w400)),
+          Text(
+            _selectedCategoryName ?? '选择话题',
+            style: TextStyle(
+              fontSize: 14,
+              color: _selectedCategoryName != null ? const Color(0xFFFF2442) : const Color(0xFFCCCCCC),
+              fontWeight: _selectedCategoryName != null ? FontWeight.w500 : FontWeight.w400,
+            ),
+          ),
         ]),
       ),
     );
   }
 
-  Widget _buildBlock(int idx) {
-    final b = _blocks[idx];
+  List<Widget> _buildEditorItems() {
+    final widgets = <Widget>[];
+    for (int i = 0; i < _items.length; i++) {
+      widgets.add(_buildEditorItem(i));
+      if (i < _items.length - 1) {
+        widgets.add(_buildInsertDivider(i + 1));
+      }
+    }
+    return widgets;
+  }
+
+  Widget _buildEditorItem(int idx) {
+    final item = _items[idx];
+    switch (item.type) {
+      case 'text':
+        return _buildTextItem(idx);
+      case 'image':
+        return _buildImageItem(idx);
+      case 'voice':
+        return _buildVoiceItem(idx);
+      case 'link':
+        return _buildLinkItem(idx);
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildTextItem(int idx) {
+    return _TextItemWidget(
+      key: ValueKey('text_item_$idx'),
+      idx: idx,
+      controller: idx < _textControllers.length ? _textControllers[idx] : null,
+      focusNode: idx < _textFocusNodes.length ? _textFocusNodes[idx] : null,
+      onChanged: (v) => _onTextChanged(idx, v),
+      onTap: () {
+        setState(() {
+          _currentTextIndex = idx;
+        });
+      },
+      onFocus: (hasFocus) {
+        if (hasFocus && !_emojiInserting) {
+          setState(() => _showEmojiPanel = false);
+        }
+      },
+    );
+  }
+
+  Widget _buildImageItem(int idx) {
+    final item = _items[idx];
+    final allPaths = [...item.existingUrls, ...item.imagePaths];
+    if (allPaths.isEmpty) {
+      return _buildEmptyImagePlaceholder(idx);
+    }
+
+    final liveIndices = <int>{};
+    for (int i = 0; i < item.existingLiveVideoUrls.length; i++) {
+      if (item.existingLiveVideoUrls[i].isNotEmpty) liveIndices.add(i);
+    }
+    for (int i = 0; i < item.liveVideoPaths.length; i++) {
+      liveIndices.add(item.existingUrls.length + i);
+    }
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(color: const Color(0xFFFAFAFA), borderRadius: BorderRadius.circular(8)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Padding(padding: const EdgeInsets.only(left: 8, top: 6), child: Text(_blockLabel(b.type), style: const TextStyle(fontSize: 10, color: Color(0xFF999999), fontWeight: FontWeight.w500))),
-          const Spacer(),
-          if (idx > 0) GestureDetector(onTap: () => _moveBlock(idx, idx - 1), child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.keyboard_arrow_up, size: 16, color: Color(0xFFCCCCCC)))),
-          if (idx < _blocks.length - 1) GestureDetector(onTap: () => _moveBlock(idx, idx + 1), child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFFCCCCCC)))),
-          if (_blocks.length > 1) GestureDetector(onTap: () => _removeBlock(idx), child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.close, size: 14, color: Color(0xFFCCCCCC)))),
-        ]),
-        _buildBlockContent(idx, b),
-        const SizedBox(height: 6),
-      ]),
-    );
-  }
-
-  String _blockLabel(_BlockType t) {
-    switch (t) {
-      case _BlockType.text: return '文字';
-      case _BlockType.image: return '图片';
-      case _BlockType.voice: return '音频';
-      case _BlockType.link: return '链接';
-    }
-  }
-
-  Widget _buildBlockContent(int idx, _ContentBlock b) {
-    switch (b.type) {
-      case _BlockType.text: return _buildTextBlock(idx, b);
-      case _BlockType.image: return _buildImageBlock(idx, b);
-      case _BlockType.voice: return _buildVoiceBlock(idx, b);
-      case _BlockType.link: return _buildLinkBlock(idx, b);
-    }
-  }
-
-  Widget _buildTextBlock(int idx, _ContentBlock b) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: TextField(
-        controller: b.textCtrl,
-        focusNode: idx == _blocks.length - 1 ? _textFocus : null,
-        onChanged: (v) => b.text = v,
-        maxLines: null, minLines: 2,
-        style: const TextStyle(fontSize: 14, color: Color(0xFF333333), height: 1.8),
-        decoration: const InputDecoration(hintText: '添加正文', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFCCCCCC)), border: InputBorder.none, contentPadding: EdgeInsets.zero),
-      ),
-    );
-  }
-
-  Widget _buildImageBlock(int idx, _ContentBlock b) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Text('布局', style: TextStyle(fontSize: 11, color: Color(0xFF999999))),
-          const SizedBox(width: 6),
-          _buildLayoutOpt(idx, 'grid', '九宫格'),
-          const SizedBox(width: 4),
-          _buildLayoutOpt(idx, 'double', '双列'),
-          const SizedBox(width: 4),
-          _buildLayoutOpt(idx, 'stack', '折叠'),
-          const SizedBox(width: 4),
-          _buildLayoutOpt(idx, 'full', '全宽'),
-        ]),
-        const SizedBox(height: 6),
-        _renderImageLayout(idx, b),
-      ]),
-    );
-  }
-
-  Widget _buildLayoutOpt(int idx, String layout, String label) {
-    final isOn = _blocks[idx].imageLayout == layout;
-    return GestureDetector(
-      onTap: () => setState(() => _blocks[idx].imageLayout = layout),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200), curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(color: isOn ? const Color(0xFFFFF0F0) : const Color(0xFFF0F0F0), borderRadius: BorderRadius.circular(6), border: isOn ? Border.all(color: const Color(0xFFFF2442), width: 0.5) : null),
-        child: Text(label, style: TextStyle(fontSize: 10, color: isOn ? const Color(0xFFFF2442) : const Color(0xFF999999))),
-      ),
-    );
-  }
-
-  Widget _imgPreview(String src, {double? width, double? height, BoxFit fit = BoxFit.cover}) {
-    if (src.startsWith('http')) {
-      return CachedNetworkImage(imageUrl: src, width: width, height: height, fit: fit, placeholder: (ctx, url) => Container(color: const Color(0xFFF5F5F5)), errorWidget: (ctx, url, err) => Container(color: const Color(0xFFF5F5F5), child: const Icon(Icons.broken_image, color: Color(0xFFCCCCCC))));
-    }
-    if (src.startsWith('/')) {
-      return CachedNetworkImage(imageUrl: fullUrl(src), width: width, height: height, fit: fit, placeholder: (ctx, url) => Container(color: const Color(0xFFF5F5F5)), errorWidget: (ctx, url, err) => Container(color: const Color(0xFFF5F5F5), child: const Icon(Icons.broken_image, color: Color(0xFFCCCCCC))));
-    }
-    return Image.file(File(src), fit: fit);
-  }
-
-  Widget _imgStack(String src, Widget image, {VoidCallback? onRemove}) {
-    return Stack(children: [
-      ClipRRect(borderRadius: BorderRadius.circular(4), child: image),
-      if (onRemove != null) Positioned(top: 2, right: 2, child: GestureDetector(onTap: onRemove, child: Container(width: 16, height: 16, decoration: const BoxDecoration(color: Color(0x8C000000), shape: BoxShape.circle), child: const Icon(Icons.close, size: 10, color: Colors.white)))),
-    ]);
-  }
-
-  Widget _renderImageLayout(int idx, _ContentBlock b) {
-    final entries = <_ImgSrc>[
-      for (final url in b.existingUrls) _ImgSrc(url, true, () => setState(() => b.existingUrls.remove(url))),
-      for (final e in b.imagePaths.asMap().entries) _ImgSrc(e.value, false, () => setState(() => b.imagePaths.removeAt(e.key))),
-    ];
-    if (entries.isEmpty) return const SizedBox.shrink();
-
-    if (b.imageLayout == 'full') {
-      return Column(children: entries.map((e) => _imgStack(e.src, _imgPreview(e.src, width: double.infinity), onRemove: e.onRemove)).toList());
-    }
-    if (b.imageLayout == 'double') {
-      return Wrap(spacing: 3, runSpacing: 3, children: entries.map((e) => SizedBox(
-        width: (MediaQuery.of(context).size.width - 44) / 2 - 4,
-        child: AspectRatio(aspectRatio: 1, child: _imgStack(e.src, _imgPreview(e.src, fit: BoxFit.cover), onRemove: e.onRemove)),
-      )).toList());
-    }
-    if (b.imageLayout == 'stack') {
-      return SizedBox(height: 220, child: Stack(children: [
-        for (int i = entries.length - 1; i >= 0; i--)
-          AnimatedPositioned(duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic, left: i * 8.0, top: i * 6.0, right: (entries.length - 1 - i) * 8.0, bottom: (entries.length - 1 - i) * 6.0, child: Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2))]), child: ClipRRect(borderRadius: BorderRadius.circular(8), child: _imgPreview(entries[i].src, fit: BoxFit.cover)))),
-      ]));
-    }
-    final s = (MediaQuery.of(context).size.width - 44) / 3;
-    return Wrap(spacing: 3, runSpacing: 3, children: entries.map((e) => SizedBox(
-      width: s, height: s,
-      child: _imgStack(e.src, _imgPreview(e.src, fit: BoxFit.cover), onRemove: e.onRemove),
-    )).toList());
-  }
-
-  Widget _buildVoiceBlock(int idx, _ContentBlock b) {
-    if (_isRecording && _recordingBlockIdx == idx) {
-      return Container(
-        margin: const EdgeInsets.all(8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: const Color(0xFFFFF5F5), borderRadius: BorderRadius.circular(10)),
-        child: Column(children: [
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(16, (i) {
-            final h = (6.0 + (i * 11.0 + i * i * 7.0) % 18.0).clamp(4.0, 24.0);
-            return AnimatedContainer(duration: Duration(milliseconds: 200 + (i % 3) * 80), margin: const EdgeInsets.symmetric(horizontal: 1.5), width: 3, height: h, decoration: BoxDecoration(color: const Color(0xFFFF2442).withValues(alpha: 0.7), borderRadius: BorderRadius.circular(1.5)));
-          })),
-          const SizedBox(height: 10),
-          Text(fmtVoiceTime(_recordSeconds), style: const TextStyle(fontSize: 24, color: Color(0xFFFF2442), fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildImageGrid(idx, allPaths, liveIndices),
           const SizedBox(height: 8),
-          GestureDetector(onTap: _stopRecording, child: Container(width: 48, height: 48, decoration: BoxDecoration(color: const Color(0xFFFF2442), shape: BoxShape.circle, boxShadow: [BoxShadow(color: const Color(0xFFFF2442).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 3))]), child: const Icon(Icons.stop, color: Colors.white, size: 24))),
-        ]),
-      );
-    }
-    if (b.voicePath != null) {
-      final isPlaying = _playingVoiceIdx == idx;
-      final isLoading = isPlaying && _voiceLoading;
-      return GestureDetector(
-        onTap: () => _previewVoice(idx, b.voicePath!),
-        child: Container(
-          margin: const EdgeInsets.all(8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(8)),
-          child: Row(children: [
-            Container(width: 28, height: 28, decoration: const BoxDecoration(color: Color(0xFFFF2442), shape: BoxShape.circle), child: Center(child: isLoading ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : (isPlaying ? const Icon(Icons.pause, color: Colors.white, size: 14) : const Icon(Icons.play_arrow, color: Colors.white, size: 14)))),
-            const SizedBox(width: 8),
-            Expanded(child: Text(b.voicePath!.split(Platform.pathSeparator).last, style: const TextStyle(fontSize: 12, color: Color(0xFF333333)), overflow: TextOverflow.ellipsis)),
-            if (b.voiceDuration > 0) Text(fmtVoiceTime(b.voiceDuration), style: const TextStyle(fontSize: 11, color: Color(0xFFFF2442), fontWeight: FontWeight.w600)),
-          ]),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Row(children: [
-        Expanded(child: GestureDetector(
-          onTap: () => _pickAudioFile(idx),
-          child: Container(padding: const EdgeInsets.symmetric(vertical: 14), decoration: BoxDecoration(color: const Color(0xFFE6F7FF), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('上传音频文件', style: TextStyle(fontSize: 13, color: Color(0xFF1890FF))))),
-        )),
-        const SizedBox(width: 8),
-        Expanded(child: GestureDetector(
-          onTap: () => _startRecording(idx),
-          child: Container(padding: const EdgeInsets.symmetric(vertical: 14), decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('录制音频', style: TextStyle(fontSize: 13, color: Color(0xFFFF2442))))),
-        )),
-      ]),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => _addImagesToItem(idx),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.add_photo_alternate_outlined, size: 14, color: Color(0xFF666666)),
+                      SizedBox(width: 4),
+                      Text('添加图片', style: TextStyle(fontSize: 12, color: Color(0xFF666666))),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _removeItem(idx),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.delete_outline, size: 18, color: Color(0xFF999999)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildLayoutBtn(idx, 'full', Icons.crop_original, '全宽'),
+              _buildLayoutBtn(idx, 'dual', Icons.view_agenda, '双图'),
+              _buildLayoutBtn(idx, 'grid', Icons.grid_view, '九宫格'),
+              _buildLayoutBtn(idx, 'stack', Icons.layers, '堆叠'),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildLinkBlock(int idx, _ContentBlock b) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: TextField(
-        controller: b.linkCtrl,
-        onChanged: (v) => b.linkUrl = v,
-        style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-        decoration: InputDecoration(
-          hintText: '输入链接地址', hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFCCCCCC)),
-          filled: true, fillColor: const Color(0xFFF5F7FA),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-          prefixIcon: const Icon(Icons.link, size: 16, color: Color(0xFF999999)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  Widget _buildEmptyImagePlaceholder(int idx) {
+    return GestureDetector(
+      onTap: () => _addImagesToItem(idx),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        height: 120,
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAFA),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE8E8E8)),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.add_photo_alternate_outlined, size: 32, color: Color(0xFFCCCCCC)),
+              SizedBox(height: 8),
+              Text('点击添加图片', style: TextStyle(fontSize: 13, color: Color(0xFF999999))),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildKeyboardToolbar() {
-    return Container(
-      height: 44,
-      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFF0F0F0), width: 0.5))),
-      child: Row(children: [
-        const SizedBox(width: 12),
-        _buildToolBtn(Icons.image_outlined, const Color(0xFFE6F7FF), const Color(0xFF1890FF), _addImageBlock),
-        const SizedBox(width: 10),
-        _buildToolBtn(Icons.mic_outlined, const Color(0xFFFFF0F0), const Color(0xFFFF2442), _addVoiceBlock),
-        const Spacer(),
-        _buildToolBtn(Icons.link_outlined, const Color(0xFFF0F5FF), const Color(0xFF1890FF), _addLinkBlock),
-        const SizedBox(width: 12),
-      ]),
+  Widget _buildLayoutBtn(int idx, String layout, IconData icon, String label) {
+    final item = _items[idx];
+    final isActive = item.imageLayout == layout;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            item.imageLayout = layout;
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive ? const Color(0xFFFFF0F0) : const Color(0xFFF5F5F5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isActive ? const Color(0xFFFF2442) : Colors.transparent,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: isActive ? const Color(0xFFFF2442) : const Color(0xFF666666)),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isActive ? const Color(0xFFFF2442) : const Color(0xFF666666),
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildToolBtn(IconData icon, Color bg, Color fg, VoidCallback onTap) {
+  Widget _buildImageGrid(int idx, List<String> paths, Set<int> liveIndices) {
+    final item = _items[idx];
+    final layout = item.imageLayout;
+
+    if (layout == 'stack' && paths.length > 1) {
+      return _buildStackLayout(idx, paths, liveIndices);
+    }
+    if (layout == 'full') {
+      return _buildReorderableColumn(idx, paths, liveIndices);
+    }
+    if (layout == 'dual' || (layout == 'grid' && paths.length == 2)) {
+      return _buildReorderableRow(idx, paths, liveIndices);
+    }
+    return _buildReorderableWrap(idx, paths, liveIndices);
+  }
+
+  Widget _buildReorderableColumn(int idx, List<String> paths, Set<int> liveIndices) {
+    return Column(
+      children: paths.asMap().entries.map((e) => Padding(
+        padding: EdgeInsets.only(bottom: e.key < paths.length - 1 ? 4 : 0),
+        child: LongPressDraggable<int>(
+          data: e.key,
+          feedback: Material(elevation: 4, borderRadius: BorderRadius.circular(8), child: SizedBox(width: MediaQuery.of(context).size.width - 28, child: _buildSingleImage(idx, e.value, e.key, liveIndices.contains(e.key)))),
+          childWhenDragging: Opacity(opacity: 0.3, child: _buildSingleImage(idx, e.value, e.key, liveIndices.contains(e.key))),
+          child: DragTarget<int>(
+            onAcceptWithDetails: (from) => _reorderImage(idx, from.data, e.key),
+            builder: (ctx, candidate, rejected) => AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: candidate.isNotEmpty ? Border.all(color: const Color(0xFFFF2442), width: 2) : null,
+              ),
+              child: _buildSingleImage(idx, e.value, e.key, liveIndices.contains(e.key)),
+            ),
+          ),
+        ),
+      )).toList(),
+    );
+  }
+
+  Widget _buildReorderableRow(int idx, List<String> paths, Set<int> liveIndices) {
+    return Row(
+      children: paths.asMap().entries.map((e) => Expanded(
+        child: Padding(
+          padding: EdgeInsets.only(right: e.key == 0 ? 4 : 0),
+          child: LongPressDraggable<int>(
+            data: e.key,
+            feedback: Material(elevation: 4, borderRadius: BorderRadius.circular(6), child: SizedBox(width: (MediaQuery.of(context).size.width - 32) / 2, height: (MediaQuery.of(context).size.width - 32) / 2, child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key)))),
+            childWhenDragging: Opacity(opacity: 0.3, child: AspectRatio(aspectRatio: 1, child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key)))),
+            child: DragTarget<int>(
+              onAcceptWithDetails: (from) => _reorderImage(idx, from.data, e.key),
+              builder: (ctx, candidate, rejected) => AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  border: candidate.isNotEmpty ? Border.all(color: const Color(0xFFFF2442), width: 2) : null,
+                ),
+                child: AspectRatio(aspectRatio: 1, child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key))),
+              ),
+            ),
+          ),
+        ),
+      )).toList(),
+    );
+  }
+
+  Widget _buildReorderableWrap(int idx, List<String> paths, Set<int> liveIndices) {
+    const crossCount = 3;
+    const spacing = 4.0;
+    final width = (MediaQuery.of(context).size.width - 28 - spacing * (crossCount - 1)) / crossCount;
+    return Wrap(
+      spacing: spacing,
+      runSpacing: spacing,
+      children: paths.asMap().entries.map((e) => SizedBox(
+        width: width,
+        height: width,
+        child: LongPressDraggable<int>(
+          data: e.key,
+          feedback: Material(elevation: 4, borderRadius: BorderRadius.circular(6), child: SizedBox(width: width, height: width, child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key)))),
+          childWhenDragging: Opacity(opacity: 0.3, child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key))),
+          child: DragTarget<int>(
+            onAcceptWithDetails: (from) => _reorderImage(idx, from.data, e.key),
+            builder: (ctx, candidate, rejected) => AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: candidate.isNotEmpty ? Border.all(color: const Color(0xFFFF2442), width: 2) : null,
+              ),
+              child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key)),
+            ),
+          ),
+        ),
+      )).toList(),
+    );
+  }
+
+  void _reorderImage(int itemIdx, int fromIdx, int toIdx) {
+    if (fromIdx == toIdx) return;
+    setState(() {
+      final item = _items[itemIdx];
+      final allUrls = [...item.existingUrls, ...item.imagePaths];
+      if (fromIdx >= allUrls.length || toIdx >= allUrls.length) return;
+
+      final fromIsExisting = fromIdx < item.existingUrls.length;
+      final toIsExisting = toIdx < item.existingUrls.length;
+
+      if (fromIsExisting && toIsExisting) {
+        final url = item.existingUrls.removeAt(fromIdx);
+        final videoUrl = fromIdx < item.existingLiveVideoUrls.length ? item.existingLiveVideoUrls.removeAt(fromIdx) : '';
+        final insertAt = toIdx > fromIdx ? toIdx : toIdx;
+        item.existingUrls.insert(insertAt, url);
+        if (videoUrl.isNotEmpty) {
+          if (insertAt <= item.existingLiveVideoUrls.length) {
+            item.existingLiveVideoUrls.insert(insertAt, videoUrl);
+          } else {
+            item.existingLiveVideoUrls.add(videoUrl);
+          }
+        }
+      } else if (!fromIsExisting && !toIsExisting) {
+        final localFrom = fromIdx - item.existingUrls.length;
+        final localTo = toIdx - item.existingUrls.length;
+        if (localFrom < item.imagePaths.length && localTo < item.imagePaths.length) {
+          final path = item.imagePaths.removeAt(localFrom);
+          final thumb = localFrom < item.imageThumbs.length ? item.imageThumbs.removeAt(localFrom) : null;
+          final livePath = localFrom < item.liveVideoPaths.length ? item.liveVideoPaths.removeAt(localFrom) : null;
+          final insertAt = localTo > localFrom ? localTo : localTo;
+          item.imagePaths.insert(insertAt, path);
+          if (thumb != null) {
+            if (insertAt <= item.imageThumbs.length) {
+              item.imageThumbs.insert(insertAt, thumb);
+            } else {
+              item.imageThumbs.add(thumb);
+            }
+          }
+          if (livePath != null) {
+            if (insertAt <= item.liveVideoPaths.length) {
+              item.liveVideoPaths.insert(insertAt, livePath);
+            } else {
+              item.liveVideoPaths.add(livePath);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  Widget _buildStackLayout(int idx, List<String> paths, Set<int> liveIndices) {
+    final isExpanded = _expandedStacks.contains(idx);
+    if (isExpanded) {
+      return _buildReorderableWrap(idx, paths, liveIndices);
+    }
+    return GestureDetector(
+      onTap: () => setState(() => _expandedStacks.add(idx)),
+      child: SizedBox(
+        height: 200,
+        child: Stack(
+          children: paths.asMap().entries.map((e) {
+            final offset = e.key * 8.0;
+            return Positioned(
+              left: offset,
+              top: offset,
+              child: Container(
+                width: 180 - offset,
+                height: 180 - offset,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: _buildImageCell(idx, e.value, e.key, liveIndices.contains(e.key)),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSingleImage(int itemIdx, String src, int imgIdx, bool isLive) {
+    Uint8List? thumbData;
+    final item = _items[itemIdx];
+    final localIdx = imgIdx - item.existingUrls.length;
+    if (localIdx >= 0 && localIdx < item.imageThumbs.length) {
+      thumbData = item.imageThumbs[localIdx];
+    }
+    final videoPath = isLive && localIdx >= 0 && localIdx < item.liveVideoPaths.length ? item.liveVideoPaths[localIdx] : null;
+    final isPlaying = _livePhotoPlaying && _livePhotoPath == videoPath;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Stack(
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _imgPreview(src, thumbData: thumbData, fit: BoxFit.cover),
+                if (isPlaying && _livePhotoCtrl != null && _livePhotoCtrl!.value.isInitialized)
+                  FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _livePhotoCtrl!.value.size.width,
+                      height: _livePhotoCtrl!.value.size.height,
+                      child: VideoPlayer(_livePhotoCtrl!),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (isLive)
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: _publishLiveBadge(videoPath: videoPath),
+            ),
+          Positioned(
+            right: 8,
+            top: 8,
+            child: GestureDetector(
+              onTap: () => _removeSingleImage(itemIdx, imgIdx),
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageCell(int itemIdx, String src, int imgIdx, bool isLive) {
+    Uint8List? thumbData;
+    final item = _items[itemIdx];
+    final localIdx = imgIdx - item.existingUrls.length;
+    if (localIdx >= 0 && localIdx < item.imageThumbs.length) {
+      thumbData = item.imageThumbs[localIdx];
+    }
+    final videoPath = isLive && localIdx >= 0 && localIdx < item.liveVideoPaths.length ? item.liveVideoPaths[localIdx] : null;
+    final isPlaying = _livePhotoPlaying && _livePhotoPath == videoPath;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _imgPreview(src, thumbData: thumbData, fit: BoxFit.cover),
+          if (isPlaying && _livePhotoCtrl != null && _livePhotoCtrl!.value.isInitialized)
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _livePhotoCtrl!.value.size.width,
+                height: _livePhotoCtrl!.value.size.height,
+                child: VideoPlayer(_livePhotoCtrl!),
+              ),
+            ),
+          if (isLive)
+            Positioned(
+              left: 4,
+              bottom: 4,
+              child: _publishLiveBadge(small: true, videoPath: videoPath),
+            ),
+          Positioned(
+            right: 4,
+            top: 4,
+            child: GestureDetector(
+              onTap: () => _removeSingleImage(itemIdx, imgIdx),
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 12, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _playPublishLivePhoto(String videoPath) async {
+    if (_livePhotoPlaying) return;
+    _stopPublishLivePhoto();
+    _livePhotoCtrl = VideoPlayerController.file(File(videoPath));
+    try {
+      await _livePhotoCtrl!.initialize();
+      _livePhotoCtrl!.setLooping(false);
+      _livePhotoCtrl!.addListener(_onPublishLivePhotoEnd);
+      _livePhotoCtrl!.play();
+      _livePhotoPath = videoPath;
+      setState(() => _livePhotoPlaying = true);
+    } catch (_) {
+      _livePhotoCtrl?.dispose();
+      _livePhotoCtrl = null;
+    }
+  }
+
+  void _onPublishLivePhotoEnd() {
+    if (_livePhotoCtrl != null && !_livePhotoCtrl!.value.isPlaying && _livePhotoCtrl!.value.position >= _livePhotoCtrl!.value.duration) {
+      _stopPublishLivePhoto();
+    }
+  }
+
+  void _stopPublishLivePhoto() {
+    _livePhotoCtrl?.removeListener(_onPublishLivePhotoEnd);
+    _livePhotoCtrl?.pause();
+    _livePhotoCtrl?.dispose();
+    _livePhotoCtrl = null;
+    _livePhotoPath = null;
+    if (_livePhotoPlaying && mounted) {
+      setState(() => _livePhotoPlaying = false);
+    }
+  }
+
+  Widget _publishLiveBadge({bool small = false, String? videoPath}) {
+    final isPlaying = _livePhotoPlaying && _livePhotoPath == videoPath;
+    return GestureDetector(
+      onTap: videoPath != null ? () => _playPublishLivePhoto(videoPath) : null,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: small ? 4 : 6, vertical: small ? 2 : 3),
+        decoration: BoxDecoration(
+          color: isPlaying
+              ? const Color(0xFFFF2442).withValues(alpha: 0.9)
+              : Colors.white.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(small ? 3 : 4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset('assets/icons/icon_live_photo.png', width: small ? 10 : 14, height: small ? 10 : 14, color: isPlaying ? Colors.white : null),
+            SizedBox(width: small ? 2 : 3),
+            Text('LIVE', style: TextStyle(fontSize: small ? 8 : 10, color: isPlaying ? Colors.white : const Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _removeSingleImage(int itemIdx, int imgIdx) {
+    setState(() {
+      final item = _items[itemIdx];
+      if (imgIdx < item.existingUrls.length) {
+        item.existingUrls.removeAt(imgIdx);
+        if (imgIdx < item.existingLiveVideoUrls.length) {
+          item.existingLiveVideoUrls.removeAt(imgIdx);
+        }
+      } else {
+        final localIdx = imgIdx - item.existingUrls.length;
+        if (localIdx < item.imagePaths.length) {
+          item.imagePaths.removeAt(localIdx);
+          if (localIdx < item.imageThumbs.length) {
+            item.imageThumbs.removeAt(localIdx);
+          }
+          if (localIdx < item.liveVideoPaths.length) {
+            item.liveVideoPaths.removeAt(localIdx);
+          }
+        }
+      }
+      if (item.existingUrls.isEmpty && item.imagePaths.isEmpty) {
+        item.imageLayout = 'grid';
+      }
+    });
+  }
+
+  Widget _buildVoiceItem(int idx) {
+    final item = _items[idx];
+    if (item.voicePath != null) {
+      final isPlaying = _playingVoiceIdx == idx;
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8F8F8),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: () => _previewVoice(idx, item.voicePath!),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(color: Color(0xFFFF2442), shape: BoxShape.circle),
+                child: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 16),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('语音消息', style: TextStyle(fontSize: 13, color: Color(0xFF333333), fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: List.generate(20, (i) => Container(
+                      width: 3,
+                      height: 4 + (i % 5) * 2.0,
+                      margin: const EdgeInsets.only(right: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF2442).withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(1.5),
+                      ),
+                    )),
+                  ),
+                ],
+              ),
+            ),
+            if (item.voiceDuration > 0)
+              Text(
+                '${item.voiceDuration}s',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF999999)),
+              ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _removeItem(idx),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F0F0),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.close, size: 14, color: Color(0xFF999999)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isRecording && _recordingItemIdx == idx) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF0F0),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF2442),
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: const Color(0xFFFF2442).withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 2)],
+              ),
+              child: const Icon(Icons.mic, color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '正在录制 ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFFFF2442), fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: (_recordSeconds % 60) / 60.0,
+                      backgroundColor: const Color(0xFFFFD9DD),
+                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF2442)),
+                      minHeight: 4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _stopRecording,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF2442),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Text('停止', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F8F8),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => _startRecording(idx),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: const BoxDecoration(color: Color(0xFFFF2442), shape: BoxShape.circle),
+              child: const Icon(Icons.mic, color: Colors.white, size: 16),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('点击录制语音', style: TextStyle(fontSize: 13, color: Color(0xFF333333), fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                const Text('录制后可添加语音消息', style: TextStyle(fontSize: 11, color: Color(0xFF999999))),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _pickAudioFile(idx),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE6F7FF),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Text('上传文件', style: TextStyle(fontSize: 12, color: Color(0xFF1890FF))),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => _removeItem(idx),
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F0F0),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.close, size: 14, color: Color(0xFF999999)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLinkItem(int idx) {
+    final item = _items[idx];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: idx < _textControllers.length ? _textControllers[idx] : null,
+              onChanged: (v) => item.linkUrl = v,
+              style: const TextStyle(fontSize: 14, color: Color(0xFF1890FF), decoration: TextDecoration.underline),
+              decoration: const InputDecoration(
+                hintText: '输入链接地址',
+                hintStyle: TextStyle(fontSize: 14, color: Color(0xFFCCCCCC)),
+                border: InputBorder.none,
+                prefixIcon: Icon(Icons.link, size: 18, color: Color(0xFF999999)),
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _removeItem(idx),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.delete_outline, size: 18, color: Color(0xFF999999)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInsertDivider(int insertIndex) {
+    return GestureDetector(
+      onTap: () => _showInsertMenu(insertIndex),
+      child: Container(
+        height: 24,
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        child: Center(
+          child: Container(
+            width: 32,
+            height: 4,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8E8E8),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddMoreButton() {
+    return GestureDetector(
+      onTap: () => _showInsertMenu(_items.length),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAFA),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE8E8E8)),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add, size: 18, color: Color(0xFF999999)),
+            SizedBox(width: 4),
+            Text('添加更多内容', style: TextStyle(fontSize: 13, color: Color(0xFF999999))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomToolbar() {
+    return Container(
+      height: 48,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Color(0xFFF0F0F0), width: 0.5)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 8),
+          _buildToolBtn(Icons.image_outlined, () {
+            setState(() => _showEmojiPanel = false);
+            _insertImageAt(_items.length);
+          }),
+          _buildToolBtn(Icons.mic_outlined, () {
+            setState(() => _showEmojiPanel = false);
+            _insertVoiceAt(_items.length);
+          }),
+          _buildToolBtn(Icons.link_outlined, () {
+            setState(() => _showEmojiPanel = false);
+            _insertLinkAt(_items.length);
+          }),
+          _buildToolBtn(
+            _showEmojiPanel ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined,
+            () {
+              if (_showEmojiPanel) {
+                setState(() => _showEmojiPanel = false);
+                if (_currentTextIndex >= 0 && _currentTextIndex < _textFocusNodes.length) {
+                  _textFocusNodes[_currentTextIndex].requestFocus();
+                }
+              } else {
+                FocusScope.of(context).unfocus();
+                setState(() => _showEmojiPanel = true);
+              }
+            },
+          ),
+          const Spacer(),
+          if (_selectedCategoryName != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF0F0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '#$_selectedCategoryName',
+                style: const TextStyle(fontSize: 12, color: Color(0xFFFF2442)),
+              ),
+            ),
+          const SizedBox(width: 12),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolBtn(IconData icon, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(width: 32, height: 32, decoration: BoxDecoration(color: bg, shape: BoxShape.circle), child: Center(child: Icon(icon, size: 16, color: fg))),
-    );
-  }
-
-  Widget _buildOverlay() {
-    return GestureDetector(
-      onTap: _closeOverlay,
-      child: FadeTransition(
-        opacity: _fadeAnim,
-        child: Container(color: Colors.black.withValues(alpha: 0.4), child: GestureDetector(onTap: () {}, child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [SlideTransition(position: _slideAnim, child: _currentOverlay == _OverlayType.topic ? _buildTopicSheet() : _currentOverlay == _OverlayType.voice ? _buildVoiceSheet() : _buildLinkSheet())]))),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 48,
+        height: 48,
+        alignment: Alignment.center,
+        child: Icon(icon, size: 24, color: const Color(0xFF666666)),
       ),
     );
   }
 
-  Widget _buildTopicSheet() {
-    final pp = Provider.of<PostProvider>(context, listen: true);
+  Widget _buildEmojiPanel() {
+    return Container(
+      height: 250,
+      color: const Color(0xFFF5F5F5),
+      child: GridView.builder(
+        padding: const EdgeInsets.all(12),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 8,
+          childAspectRatio: 1,
+        ),
+        itemCount: emojiAssets.length,
+        itemBuilder: (ctx, i) => GestureDetector(
+          onTap: () => _insertGifEmoji(emojiAssets[i]),
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Image.asset(emojiAssets[i], fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imgPreview(String src, {Uint8List? thumbData, double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (thumbData != null && thumbData.isNotEmpty) {
+      return Image.memory(thumbData, width: width, height: height, fit: fit);
+    }
+    final file = File(src);
+    if (file.existsSync()) {
+      return Image.file(file, width: width, height: height, fit: fit);
+    }
+    if (src.startsWith('http')) {
+      return CachedNetworkImage(
+        imageUrl: src,
+        width: width,
+        height: height,
+        fit: fit,
+        placeholder: (context, url) => Container(width: width, height: height, color: const Color(0xFFF5F5F5)),
+        errorWidget: (context, url, error) => Container(
+          width: width,
+          height: height,
+          color: const Color(0xFFF5F5F5),
+          child: const Icon(Icons.broken_image, color: Color(0xFFCCCCCC)),
+        ),
+      );
+    }
+    if (src.startsWith('/')) {
+      return CachedNetworkImage(
+        imageUrl: fullUrl(src),
+        width: width,
+        height: height,
+        fit: fit,
+        placeholder: (context, url) => Container(width: width, height: height, color: const Color(0xFFF5F5F5)),
+        errorWidget: (context, url, error) => Container(
+          width: width,
+          height: height,
+          color: const Color(0xFFF5F5F5),
+          child: const Icon(Icons.broken_image, color: Color(0xFFCCCCCC)),
+        ),
+      );
+    }
+    return Container(width: width, height: height, color: const Color(0xFFF5F5F5));
+  }
+
+  void _showTopicPicker() {
+    final pp = Provider.of<PostProvider>(context, listen: false);
     final isAdmin = Provider.of<UserProvider>(context, listen: false).userInfo?.role == 1;
-    final visibleCats = pp.categories.where((c) => c.publishRestriction != 1 || isAdmin).toList();
-    return Container(
-      width: double.infinity, padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 32, height: 4, decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 16),
-        const Text('选择话题', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
-        const SizedBox(height: 16),
-        Wrap(spacing: 8, runSpacing: 8, children: visibleCats.map((c) {
-          final isOn = _selectedCategoryId == c.id.toString();
-          return GestureDetector(
-            onTap: () { setState(() { _selectedCategoryId = c.id.toString(); _selectedCategoryName = c.name; }); _closeOverlay(); },
-            child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(color: isOn ? const Color(0xFFFFF0F0) : const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(16), border: isOn ? Border.all(color: const Color(0xFFFF2442), width: 0.5) : null), child: Text(c.name, style: TextStyle(fontSize: 13, color: isOn ? const Color(0xFFFF2442) : const Color(0xFF666666)))),
-          );
-        }).toList()),
-        const SizedBox(height: 16),
-        GestureDetector(onTap: _closeOverlay, child: Container(width: double.infinity, height: 44, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('取消', style: TextStyle(fontSize: 15, color: Color(0xFF999999)))))),
-      ]),
+    final cats = pp.categories.where((c) => c.publishRestriction != 1 || isAdmin).toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(
+                children: [
+                  const Text('选择话题', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.close, size: 16, color: Color(0xFF999999)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text('选择合适的话题能让更多人看到你的笔记', style: TextStyle(fontSize: 13, color: const Color(0xFF999999))),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                itemCount: cats.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (ctx, i) {
+                  final cat = cats[i];
+                  final isSelected = _selectedCategoryId == cat.id.toString();
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedCategoryId = cat.id.toString();
+                        _selectedCategoryName = cat.name;
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFFFFF0F0) : const Color(0xFFF8F8F8),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? const Color(0xFFFF2442) : Colors.transparent,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '#',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isSelected ? Colors.white : const Color(0xFF999999),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              cat.name,
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: isSelected ? const Color(0xFFFF2442) : const Color(0xFF333333),
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (isSelected)
+                            Container(
+                              width: 20,
+                              height: 20,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFFF2442),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.check, size: 12, color: Colors.white),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildVoiceSheet() {
-    return Container(
-      width: double.infinity, padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 32, height: 4, decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 16),
-        const Text('添加音频', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
-        const SizedBox(height: 20),
-        Row(children: [
-          Expanded(child: GestureDetector(
-            onTap: () { _closeOverlay(); Future.delayed(const Duration(milliseconds: 350), () { if (mounted) { setState(() { _blocks.add(_ContentBlock(type: _BlockType.voice)); _pickAudioFile(_blocks.length - 2); }); } }); },
-            child: Container(padding: const EdgeInsets.symmetric(vertical: 20), decoration: BoxDecoration(color: const Color(0xFFE6F7FF), borderRadius: BorderRadius.circular(12)), child: const Column(children: [Icon(Icons.upload_file, color: Color(0xFF1890FF), size: 28), SizedBox(height: 6), Text('上传音频', style: TextStyle(fontSize: 13, color: Color(0xFF1890FF)))])),
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: GestureDetector(
-            onTap: () { _closeOverlay(); Future.delayed(const Duration(milliseconds: 350), () { if (mounted) { setState(() { _blocks.add(_ContentBlock(type: _BlockType.voice)); _startRecording(_blocks.length - 2); }); } }); },
-            child: Container(padding: const EdgeInsets.symmetric(vertical: 20), decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(12)), child: const Column(children: [Icon(Icons.mic, color: Color(0xFFFF2442), size: 28), SizedBox(height: 6), Text('录制音频', style: TextStyle(fontSize: 13, color: Color(0xFFFF2442)))])),
-          )),
-        ]),
-        const SizedBox(height: 16),
-        GestureDetector(onTap: _closeOverlay, child: Container(width: double.infinity, height: 44, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('取消', style: TextStyle(fontSize: 15, color: Color(0xFF999999)))))),
-      ]),
-    );
+  void _doPublish() async {
+    if (_publishing) return;
+    setState(() => _publishing = true);
+
+    try {
+      final pp = Provider.of<PostProvider>(context, listen: false);
+
+      // 先上传所有新图片和实况视频
+      final uploadedImageUrls = <String>[];
+      final uploadedLiveVideoUrls = <String>[];
+
+      for (final item in _items.where((i) => i.type == 'image')) {
+        for (int j = 0; j < item.imagePaths.length; j++) {
+          final url = await pp.uploadImage(item.imagePaths[j]);
+          if (url != null) {
+            uploadedImageUrls.add(url);
+            final isLive = j < item.liveVideoPaths.length && item.liveVideoPaths[j].isNotEmpty;
+            if (isLive) {
+              final videoUrl = await pp.uploadFile(item.liveVideoPaths[j]);
+              uploadedLiveVideoUrls.add(videoUrl ?? '');
+            } else {
+              uploadedLiveVideoUrls.add('');
+            }
+          }
+        }
+      }
+
+      // 上传音频
+      String? voiceUrl;
+      int voiceDuration = 0;
+      for (final item in _items.where((i) => i.type == 'voice')) {
+        if (item.voicePath != null && item.voicePath!.isNotEmpty) {
+          voiceUrl = await pp.uploadFile(item.voicePath!);
+          voiceDuration = item.voiceDuration;
+        }
+      }
+
+      // 构建 content_blocks
+      final contentBlocks = <Map<String, dynamic>>[];
+      int uploadedIdx = 0;
+
+      for (int i = 0; i < _items.length; i++) {
+        final item = _items[i];
+        if (item.type == 'text' && item.text.trim().isNotEmpty) {
+          contentBlocks.add({'type': 'text', 'content': item.text.trim()});
+        } else if (item.type == 'image') {
+          final imageData = <Map<String, dynamic>>[];
+          // 已有图片
+          for (int j = 0; j < item.existingUrls.length; j++) {
+            imageData.add({
+              'url': item.existingUrls[j],
+              'type': j < item.existingLiveVideoUrls.length && item.existingLiveVideoUrls[j].isNotEmpty ? 'live' : 'image',
+              'video_url': j < item.existingLiveVideoUrls.length ? item.existingLiveVideoUrls[j] : '',
+              'ratio': 1.2,
+            });
+          }
+          // 新上传图片
+          for (int j = 0; j < item.imagePaths.length; j++) {
+            if (uploadedIdx < uploadedImageUrls.length) {
+              final isLive = j < item.liveVideoPaths.length && item.liveVideoPaths[j].isNotEmpty;
+              imageData.add({
+                'url': uploadedImageUrls[uploadedIdx],
+                'type': isLive ? 'live' : 'image',
+                'video_url': isLive && uploadedIdx < uploadedLiveVideoUrls.length ? uploadedLiveVideoUrls[uploadedIdx] : '',
+                'ratio': 1.2,
+              });
+              uploadedIdx++;
+            }
+          }
+          if (imageData.isNotEmpty) {
+            contentBlocks.add({'type': 'images', 'images': imageData, 'layout': item.imageLayout});
+          }
+        } else if (item.type == 'voice' && voiceUrl != null) {
+          contentBlocks.add({'type': 'voice', 'url': voiceUrl, 'duration': voiceDuration});
+        } else if (item.type == 'link' && item.linkUrl.isNotEmpty) {
+          contentBlocks.add({'type': 'link', 'url': item.linkUrl});
+        }
+      }
+
+      // 构建 images 数组（用于后端 post_images 表）
+      final imagesData = <Map<String, dynamic>>[];
+      uploadedIdx = 0;
+      for (final item in _items.where((i) => i.type == 'image')) {
+        for (int j = 0; j < item.existingUrls.length; j++) {
+          imagesData.add({
+            'url': item.existingUrls[j],
+            'type': j < item.existingLiveVideoUrls.length && item.existingLiveVideoUrls[j].isNotEmpty ? 'live' : 'image',
+            'video_url': j < item.existingLiveVideoUrls.length ? item.existingLiveVideoUrls[j] : '',
+            'ratio': 1.2,
+          });
+        }
+        for (int j = 0; j < item.imagePaths.length; j++) {
+          if (uploadedIdx < uploadedImageUrls.length) {
+            final isLive = j < item.liveVideoPaths.length && item.liveVideoPaths[j].isNotEmpty;
+            imagesData.add({
+              'url': uploadedImageUrls[uploadedIdx],
+              'type': isLive ? 'live' : 'image',
+              'video_url': isLive && uploadedIdx < uploadedLiveVideoUrls.length ? uploadedLiveVideoUrls[uploadedIdx] : '',
+              'ratio': 1.2,
+            });
+            uploadedIdx++;
+          }
+        }
+      }
+
+      // 收集正文内容
+      String content = '';
+      if (contentBlocks.isNotEmpty && contentBlocks[0]['type'] == 'text') {
+        content = contentBlocks[0]['content'];
+      }
+
+      final data = {
+        'title': _titleCtrl.text.trim(),
+        'content': content,
+        'category_id': int.parse(_selectedCategoryId!),
+        'images': imagesData,
+        'content_blocks': contentBlocks,
+        'voice_url': voiceUrl ?? '',
+        'voice_duration': voiceDuration,
+        'link': _items.where((i) => i.type == 'link').map((i) => i.linkUrl).firstWhere((u) => u.isNotEmpty, orElse: () => ''),
+      };
+
+      Map<String, dynamic> result;
+      if (_editingPostId != null) {
+        result = await pp.updatePost(_editingPostId!, data);
+      } else {
+        result = await pp.createPost(data);
+      }
+
+      if (result['code'] == 200 || result['code'] == 201) {
+        AppToast.success(context, message: _editingPostId != null ? '修改成功' : '发布成功');
+        Navigator.pop(context, true);
+      } else {
+        AppToast.error(context, message: result['msg'] ?? '发布失败');
+      }
+    } catch (e) {
+      AppToast.error(context, message: '发布失败: $e');
+    } finally {
+      if (mounted) setState(() => _publishing = false);
+    }
   }
 
-  Widget _buildLinkSheet() {
-    return Container(
-      width: double.infinity, padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 32, height: 4, decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 16),
-        const Text('添加链接', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
-        const SizedBox(height: 16),
-        TextField(controller: _linkCtrl, decoration: InputDecoration(hintText: '输入链接地址', hintStyle: const TextStyle(fontSize: 14, color: Color(0xFFCCCCCC)), filled: true, fillColor: const Color(0xFFF5F5F5), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), style: const TextStyle(fontSize: 14, color: Color(0xFF222222))),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: GestureDetector(onTap: _closeOverlay, child: Container(height: 40, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('取消', style: TextStyle(fontSize: 14, color: Color(0xFF999999))))))),
-          const SizedBox(width: 12),
-          Expanded(child: GestureDetector(onTap: () { setState(() { _blocks.add(_ContentBlock(type: _BlockType.link, linkUrl: _linkCtrl.text.trim())); _blocks.add(_ContentBlock(type: _BlockType.text)); }); _linkCtrl.clear(); _closeOverlay(); Future.delayed(const Duration(milliseconds: 400), () { if (mounted) _textFocus.requestFocus(); }); }, child: Container(height: 40, decoration: BoxDecoration(color: const Color(0xFFFF2442), borderRadius: BorderRadius.circular(8)), child: const Center(child: Text('确定', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)))))),
-        ]),
-      ]),
+  void _pickAudioFile(int idx) async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+    if (result != null && result.files.single.path != null) {
+      setState(() => _items[idx].voicePath = result.files.single.path);
+    }
+  }
+
+  void _startRecording(int idx) async {
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      AppToast.error(context, message: '需要麦克风权限');
+      return;
+    }
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _recorder.start(const RecordConfig(), path: path);
+    setState(() {
+      _isRecording = true;
+      _recordingItemIdx = idx;
+      _recordSeconds = 0;
+    });
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _recordSeconds++);
+    });
+  }
+
+  void _stopRecording() async {
+    final path = await _recorder.stop();
+    _recordTimer?.cancel();
+    setState(() {
+      _isRecording = false;
+      if (path != null && _recordingItemIdx != null) {
+        _items[_recordingItemIdx!].voicePath = path;
+        _items[_recordingItemIdx!].voiceDuration = _recordSeconds;
+      }
+      _recordingItemIdx = null;
+    });
+  }
+
+  void _previewVoice(int idx, String path) async {
+    await _previewPlayer?.stop();
+    if (_playingVoiceIdx == idx) {
+      setState(() => _playingVoiceIdx = -1);
+      return;
+    }
+    setState(() { _playingVoiceIdx = idx; _voiceLoading = true; });
+    _previewPlayer = AudioPlayer();
+    await _previewPlayer!.play(DeviceFileSource(path));
+    _previewPlayer!.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _playingVoiceIdx = -1);
+    });
+    setState(() => _voiceLoading = false);
+  }
+}
+
+class EmojiTextEditingController extends TextEditingController {
+  EmojiTextEditingController({super.text});
+}
+
+class _TextItemWidget extends StatefulWidget {
+  final int idx;
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onTap;
+  final ValueChanged<bool>? onFocus;
+
+  const _TextItemWidget({
+    super.key,
+    required this.idx,
+    required this.controller,
+    required this.focusNode,
+    required this.onChanged,
+    required this.onTap,
+    this.onFocus,
+  });
+
+  @override
+  State<_TextItemWidget> createState() => _TextItemWidgetState();
+}
+
+class _TextItemWidgetState extends State<_TextItemWidget> {
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode?.addListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode?.removeListener(_onFocusChange);
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    widget.onFocus?.call(widget.focusNode?.hasFocus ?? false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const textStyle = TextStyle(fontSize: 15, color: Color(0xFF333333), height: 1.8);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: ExtendedTextField(
+        controller: widget.controller,
+        focusNode: widget.focusNode,
+        onChanged: widget.onChanged,
+        onTap: widget.onTap,
+        maxLines: null,
+        minLines: 1,
+        style: textStyle,
+        cursorColor: const Color(0xFFFF2442),
+        specialTextSpanBuilder: MySpecialTextSpanBuilder(textStyle: textStyle),
+        decoration: const InputDecoration(
+          hintText: '正文',
+          hintStyle: TextStyle(fontSize: 15, color: Color(0xFFCCCCCC)),
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.symmetric(vertical: 8),
+        ),
+      ),
     );
   }
 }
 
-class _ImgSrc {
-  final String src;
-  final bool isRemote;
-  final VoidCallback onRemove;
-  _ImgSrc(this.src, this.isRemote, this.onRemove);
+class EmojiText extends SpecialText {
+  static const String flag = '[emoji:';
+  final TextStyle? textStyle;
+  final int startIndex;
+
+  EmojiText(this.textStyle, {SpecialTextGestureTapCallback? onTap, required this.startIndex})
+      : super(flag, ']', textStyle, onTap: onTap);
+
+  @override
+  InlineSpan finishText() {
+    final String key = getContent();
+    final assetPath = 'assets/emojis/$key';
+    return ImageSpan(
+      AssetImage(assetPath),
+      actualText: toString(),
+      start: startIndex,
+      imageWidth: 22,
+      imageHeight: 22,
+      fit: BoxFit.contain,
+      alignment: PlaceholderAlignment.middle,
+    );
+  }
 }
 
-enum _OverlayType { none, topic, voice, link }
+class MySpecialTextSpanBuilder extends SpecialTextSpanBuilder {
+  final TextStyle? textStyle;
+
+  MySpecialTextSpanBuilder({this.textStyle});
+
+  @override
+  SpecialText? createSpecialText(String flag, {TextStyle? textStyle, SpecialTextGestureTapCallback? onTap, int? index}) {
+    if (isStart(flag, EmojiText.flag)) {
+      final startIndex = (index ?? 0) - EmojiText.flag.length + 1;
+      return EmojiText(textStyle ?? this.textStyle, onTap: onTap, startIndex: startIndex);
+    }
+    return null;
+  }
+}

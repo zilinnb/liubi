@@ -21,7 +21,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../../liubi-release.jks")
+            storeFile = file("../liubi.jks")
             storePassword = "zzs5201314"
             keyAlias = "liubi"
             keyPassword = "zzs5201314"
@@ -32,8 +32,8 @@ android {
         applicationId = "com.liubi.liubi"
         minSdk = 24
         targetSdk = 36
-        versionCode = 104
-        versionName = "Beta 0.0.5"
+        versionCode = 105
+        versionName = "Beta 0.0.6"
     }
 
     buildTypes {

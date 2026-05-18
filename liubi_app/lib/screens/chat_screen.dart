@@ -1,17 +1,26 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../utils/image_picker_util.dart';
 import 'package:photo_view/photo_view.dart';
 import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../services/storage_service.dart';
 import '../utils/helpers.dart';
+import '../utils/emoji_text.dart';
+import '../utils/emoji_assets.dart';
+import 'package:extended_text_field/extended_text_field.dart';
 
 class ChatScreen extends StatefulWidget {
   final int conversationId;
@@ -46,15 +55,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   bool _isGroupOwner = false;
   bool _hasText = false;
   bool _showPlusPanel = false;
+  bool _showEmojiPanel = false;
+  bool _emojiInserting = false;
   StreamSubscription? _msgSubscription;
   int? _currentUserId;
   String? _groupCode;
-  bool _isNearBottom = true;
 
   late AnimationController _sendBtnCtrl;
   late AnimationController _plusPanelCtrl;
   late AnimationController _menuCtrl;
+  late AnimationController _voiceWaveCtrl;
   OverlayEntry? _menuEntry;
+
+  bool _isRecording = false;
+  bool _recordCancelled = false;
+  int _recordSeconds = 0;
+  Timer? _recordTimer;
+  String? _recordPath;
+  final AudioRecorder _recorder = AudioRecorder();
+  AudioPlayer? _voicePlayer;
+  int? _playingVoiceIdx;
+  bool _voiceLoading = false;
+
+  bool _isVoiceMode = false;
 
   @override
   void initState() {
@@ -64,6 +87,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     _sendBtnCtrl.value = 1.0;
     _plusPanelCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
     _menuCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 180));
+    _voiceWaveCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
 
     _msgCtrl.addListener(() {
       final has = _msgCtrl.text.trim().isNotEmpty;
@@ -71,17 +95,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     });
 
     _focusNode.addListener(() {
-      if (_focusNode.hasFocus) {
+      if (_focusNode.hasFocus && !_emojiInserting) {
         _hidePlusPanel();
+        setState(() => _showEmojiPanel = false);
         _scheduleScrollToBottom();
-      }
-    });
-
-    _scrollCtrl.addListener(() {
-      if (_scrollCtrl.hasClients) {
-        final max = _scrollCtrl.position.maxScrollExtent;
-        final current = _scrollCtrl.offset;
-        _isNearBottom = (max - current) < 100;
       }
     });
 
@@ -149,6 +166,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     _sendBtnCtrl.dispose();
     _plusPanelCtrl.dispose();
     _menuCtrl.dispose();
+    _voiceWaveCtrl.dispose();
+    _recordTimer?.cancel();
+    _recorder.dispose();
+    _voicePlayer?.dispose();
     super.dispose();
   }
 
@@ -324,28 +345,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   }
 
   Future<void> _sendImage() async {
-    final picker = ImagePicker();
-    final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (img == null || !mounted) return;
+    final imgPath = await ImagePickerUtil.pickSingleImage(context);
+    if (imgPath == null || !mounted) return;
     final up = Provider.of<UserProvider>(context, listen: false);
+    final now = DateTime.now().toIso8601String();
+    final localMsg = {
+      'sender_id': up.userInfo?.id,
+      'sender_name': up.userInfo?.nickname ?? '',
+      'sender_avatar': up.userInfo?.avatar ?? '',
+      'content': '',
+      'type': 2,
+      'is_recalled': 0,
+      'created_at': now,
+      '_localPath': imgPath,
+      '_uploading': true,
+    };
+    setState(() => _messages.add(localMsg));
+    _scheduleScrollToBottom();
+    StorageService.appendChatMessages(widget.conversationId, [localMsg]);
     try {
-      final res = await ApiService().uploadFile('/upload/single', img.path);
+      final res = await ApiService().uploadFile('/upload/single', imgPath);
       if (res['code'] == 200) {
         final url = res['data']?['url'] as String?;
         if (url != null) {
-          final now = DateTime.now().toIso8601String();
-          final localMsg = {
-            'sender_id': up.userInfo?.id,
-            'sender_name': up.userInfo?.nickname ?? '',
-            'sender_avatar': up.userInfo?.avatar ?? '',
-            'content': url,
-            'type': 2,
-            'is_recalled': 0,
-            'created_at': now,
-          };
-          setState(() => _messages.add(localMsg));
-          _scheduleScrollToBottom();
-          StorageService.appendChatMessages(widget.conversationId, [localMsg]);
+          setState(() {
+            localMsg['content'] = url;
+            localMsg['_uploading'] = false;
+          });
+          StorageService.saveChatMessages(widget.conversationId, _messages);
           final cs = Provider.of<ChatService>(context, listen: false);
           if (!cs.isConnected) {
             await cs.connect();
@@ -353,15 +380,161 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           }
           await cs.sendMessage(widget.conversationId, url, 2);
         }
+      } else {
+        if (mounted) {
+          setState(() {
+            localMsg['_uploading'] = false;
+            localMsg['_uploadFailed'] = true;
+          });
+        }
       }
     } catch (e) {
       debugPrint('[ChatScreen] 发送图片失败: $e');
       if (mounted) {
+        setState(() {
+          localMsg['_uploading'] = false;
+          localMsg['_uploadFailed'] = true;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('图片发送失败，请检查网络'), duration: Duration(seconds: 2)),
         );
       }
     }
+  }
+
+  Future<void> _startRecording() async {
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('需要麦克风权限才能录制语音'), duration: Duration(seconds: 2)),
+        );
+      }
+      return;
+    }
+    try {
+      final dir = await getTemporaryDirectory();
+      _recordPath = '${dir.path}/chat_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder.start(const RecordConfig(), path: _recordPath!);
+      setState(() {
+        _isRecording = true;
+        _recordCancelled = false;
+        _recordSeconds = 0;
+      });
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _recordSeconds++);
+      });
+    } catch (e) {
+      debugPrint('[ChatScreen] 录音启动失败: $e');
+    }
+  }
+
+  Future<void> _stopRecording({bool cancel = false}) async {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+    if (cancel) {
+      try { await _recorder.stop(); } catch (_) {}
+      setState(() {
+        _isRecording = false;
+        _recordCancelled = false;
+        _recordSeconds = 0;
+        _recordPath = null;
+      });
+      return;
+    }
+    final path = await _recorder.stop();
+    final duration = _recordSeconds;
+    setState(() {
+      _isRecording = false;
+      _recordSeconds = 0;
+    });
+    if (path == null || duration < 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('说话时间太短'), duration: Duration(seconds: 1)),
+        );
+      }
+      return;
+    }
+    _sendVoiceMessage(path, duration);
+  }
+
+  Future<void> _sendVoiceMessage(String localPath, int duration) async {
+    final up = Provider.of<UserProvider>(context, listen: false);
+    final now = DateTime.now().toIso8601String();
+    final localMsg = {
+      'sender_id': up.userInfo?.id,
+      'sender_name': up.userInfo?.nickname ?? '',
+      'sender_avatar': up.userInfo?.avatar ?? '',
+      'content': '',
+      'type': 4,
+      'is_recalled': 0,
+      'created_at': now,
+      '_localPath': localPath,
+      '_voiceDuration': duration,
+      '_uploading': true,
+    };
+    setState(() => _messages.add(localMsg));
+    _scheduleScrollToBottom();
+    StorageService.appendChatMessages(widget.conversationId, [localMsg]);
+    try {
+      final res = await ApiService().uploadFile('/upload/single', localPath);
+      if (res['code'] == 200) {
+        final url = res['data']?['url'] as String?;
+        if (url != null) {
+          setState(() {
+            localMsg['content'] = url;
+            localMsg['_uploading'] = false;
+          });
+          StorageService.saveChatMessages(widget.conversationId, _messages);
+          final cs = Provider.of<ChatService>(context, listen: false);
+          if (!cs.isConnected) {
+            await cs.connect();
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+          await cs.sendMessage(widget.conversationId, url, 4, voiceDuration: duration);
+        }
+      }
+    } catch (e) {
+      debugPrint('[ChatScreen] 发送语音失败: $e');
+      if (mounted) {
+        setState(() {
+          localMsg['_uploading'] = false;
+          localMsg['_uploadFailed'] = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('语音发送失败，请检查网络'), duration: Duration(seconds: 2)),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleVoicePlayback(int index, Map<String, dynamic> msg) async {
+    if (_playingVoiceIdx == index) {
+      await _voicePlayer?.stop();
+      setState(() { _playingVoiceIdx = null; _voiceLoading = false; _voiceWaveCtrl.stop(); });
+      return;
+    }
+    await _voicePlayer?.stop();
+    _voicePlayer?.dispose();
+    _voicePlayer = AudioPlayer();
+    setState(() { _playingVoiceIdx = index; _voiceLoading = true; });
+    try {
+      final localPath = msg['_localPath'] as String?;
+      if (localPath != null && msg['_uploading'] == true) {
+        await _voicePlayer!.play(DeviceFileSource(localPath));
+      } else {
+        final url = fullUrl(msg['content'] ?? '');
+        await _voicePlayer!.play(UrlSource(url));
+      }
+      if (mounted) setState(() { _voiceLoading = false; _voiceWaveCtrl.repeat(); });
+    } catch (_) {
+      if (mounted) setState(() { _playingVoiceIdx = null; _voiceLoading = false; });
+      return;
+    }
+    _voicePlayer!.onPlayerComplete.listen((_) {
+      if (mounted) setState(() { _playingVoiceIdx = null; _voiceLoading = false; _voiceWaveCtrl.stop(); });
+    });
   }
 
   Future<void> _recallMessage(int? msgId) async {
@@ -518,7 +691,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     if (_showPlusPanel) {
       _plusPanelCtrl.reverse().then((_) { if (mounted) setState(() => _showPlusPanel = false); });
     } else {
-      setState(() => _showPlusPanel = true);
+      setState(() {
+        _showPlusPanel = true;
+        _showEmojiPanel = false;
+      });
       _plusPanelCtrl.forward(from: 0);
       _focusNode.unfocus();
       _scheduleScrollToBottom();
@@ -532,10 +708,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   }
 
   void _previewImage(String url) {
+    final isLocal = !url.startsWith('http') && !url.startsWith('/');
     Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white), elevation: 0),
-      body: PhotoView(imageProvider: CachedNetworkImageProvider(url), minScale: PhotoViewComputedScale.contained, maxScale: PhotoViewComputedScale.covered * 3),
+      body: PhotoView(
+        imageProvider: isLocal ? AssetImage(url) : CachedNetworkImageProvider(url) as ImageProvider,
+        minScale: PhotoViewComputedScale.contained,
+        maxScale: PhotoViewComputedScale.covered * 3,
+      ),
     )));
   }
 
@@ -561,11 +742,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildAvatar(String url, String name, int id, double radius) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: url.isNotEmpty
-          ? CachedNetworkImage(imageUrl: url, width: radius * 2, height: radius * 2, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500))))
-          : Container(width: radius * 2, height: radius * 2, color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500))),
+    return CircleAvatar(
+      radius: radius,
+      backgroundImage: url.isNotEmpty ? CachedNetworkImageProvider(url) : null,
+      backgroundColor: url.isEmpty ? getColorForId(id) : null,
+      child: url.isEmpty ? Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500)) : null,
     );
   }
 
@@ -574,6 +755,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     final statusBarH = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
     final up = Provider.of<UserProvider>(context);
+    final panelHeight = _showPlusPanel ? 100.0 + bottomPad : (_showEmojiPanel ? 250.0 : 0.0);
     return Scaffold(
       backgroundColor: const Color(0xFFEBEBEB),
       resizeToAvoidBottomInset: true,
@@ -582,13 +764,22 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           _buildNavBar(statusBarH),
           Expanded(child: _buildMsgList(up)),
           _buildInputBar(),
-          if (_showPlusPanel)
-            SizeTransition(
-              sizeFactor: CurvedAnimation(parent: _plusPanelCtrl, curve: Curves.easeOutCubic),
-              axisAlignment: -1.0,
-              child: _buildPlusPanel(bottomPad),
-            ),
-          SizedBox(height: bottomPad),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            height: panelHeight,
+            child: _showPlusPanel
+                ? SizeTransition(
+                    sizeFactor: CurvedAnimation(parent: _plusPanelCtrl, curve: Curves.easeOutCubic),
+                    axisAlignment: -1.0,
+                    child: _buildPlusPanel(bottomPad),
+                  )
+                : _showEmojiPanel
+                    ? _buildChatEmojiPanel()
+                    : const SizedBox.shrink(),
+          ),
+          if (!_showPlusPanel && !_showEmojiPanel)
+            SizedBox(height: bottomPad),
         ],
       ),
     );
@@ -662,6 +853,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     if (msgType == 3) return Padding(padding: const EdgeInsets.only(bottom: 10), child: Center(child: Text(msg['content'] ?? '', style: const TextStyle(fontSize: 12, color: Color(0xFF999999)))));
     if (isRecalled) return Padding(padding: const EdgeInsets.only(bottom: 10), child: Center(child: Text(isSelf ? '你撤回了一条消息' : '${msg['sender_name'] ?? ''}撤回了一条消息', style: const TextStyle(fontSize: 12, color: Color(0xFF999999)))));
 
+    if (msgType == 4 && !msg.containsKey('_voiceDuration')) {
+      msg['_voiceDuration'] = msg['voice_duration'] ?? 0;
+    }
+
     final rawAvatar = isSelf ? (up.userInfo?.avatar ?? '') : (msg['sender_avatar'] as String? ?? '');
     final avatar = rawAvatar.isNotEmpty ? rawAvatar : (isSelf ? '' : widget.otherUserAvatar);
     final avatarUrl = fullUrl(avatar);
@@ -683,15 +878,146 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
 
   Widget _buildBubble(Map<String, dynamic> msg, bool isSelf, int msgType) {
     if (msgType == 2) {
+      final isUploading = msg['_uploading'] == true;
+      final uploadFailed = msg['_uploadFailed'] == true;
+      final localPath = msg['_localPath'] as String?;
       final imgUrl = fullUrl(msg['content'] ?? '');
       return GestureDetector(
-        onTap: () => _previewImage(imgUrl),
+        onTap: isUploading ? null : () => _previewImage(localPath != null && imgUrl.isEmpty ? localPath : imgUrl),
         child: ClipRRect(
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(6), topRight: const Radius.circular(6),
             bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
           ),
-          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 180), child: CachedNetworkImage(imageUrl: imgUrl, fit: BoxFit.cover)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (localPath != null && imgUrl.isEmpty)
+                  Image.file(File(localPath), fit: BoxFit.cover, width: 180, height: 180 * 0.75)
+                else if (imgUrl.isNotEmpty)
+                  CachedNetworkImage(imageUrl: imgUrl, fit: BoxFit.cover)
+                else
+                  Container(width: 180, height: 180 * 0.75, color: const Color(0xFFF0F0F0)),
+                if (isUploading)
+                  Container(
+                    color: const Color(0x66000000),
+                    child: const CupertinoActivityIndicator(radius: 14, color: Colors.white),
+                  ),
+                if (uploadFailed)
+                  Container(
+                    color: const Color(0x66000000),
+                    child: const Icon(Icons.error_outline, color: Colors.white, size: 32),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (msgType == 4) {
+      final voiceDuration = msg['_voiceDuration'] as int? ?? 0;
+      final isUploading = msg['_uploading'] == true;
+      final uploadFailed = msg['_uploadFailed'] == true;
+      final msgIndex = _messages.indexOf(msg);
+      final isPlaying = _playingVoiceIdx == msgIndex;
+      final isLoading = isPlaying && _voiceLoading;
+      final barCount = (voiceDuration.clamp(1, 20) + 5).clamp(5, 20);
+      final bubbleColor = isSelf ? const Color(0xFF95EC69) : const Color(0xFFFFFFFF);
+      final iconColor = isSelf ? const Color(0xFF222222) : const Color(0xFF666666);
+      final waveColor = isSelf ? const Color(0xFF222222) : const Color(0xFF666666);
+
+      return GestureDetector(
+        onTap: () => _toggleVoicePlayback(msgIndex, msg),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.55, minWidth: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: bubbleColor,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(6), topRight: const Radius.circular(6),
+              bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isSelf) ...[
+                if (isUploading)
+                  const SizedBox(width: 16, height: 16, child: CupertinoActivityIndicator(radius: 7))
+                else if (uploadFailed)
+                  Icon(Icons.error_outline, size: 16, color: iconColor)
+                else
+                  AnimatedBuilder(
+                    animation: _voiceWaveCtrl,
+                    builder: (_, __) {
+                      if (isPlaying && !isLoading) {
+                        return Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) {
+                          final h = 6 + 8 * (0.5 + 0.5 * sin(i * 1.5 + _voiceWaveCtrl.value * 2 * pi));
+                          return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 1.5), decoration: BoxDecoration(color: waveColor, borderRadius: BorderRadius.circular(1)));
+                        }));
+                      }
+                      return Icon(Icons.play_arrow, size: 18, color: iconColor);
+                    },
+                  ),
+                const SizedBox(width: 8),
+                Flexible(child: AnimatedBuilder(
+                  animation: _voiceWaveCtrl,
+                  builder: (_, __) {
+                    return Row(mainAxisSize: MainAxisSize.min, children: List.generate(barCount, (i) {
+                      double h;
+                      if (isPlaying && !isLoading) {
+                        h = 3 + 12 * (0.5 + 0.5 * sin(i * 0.8 + _voiceWaveCtrl.value * 2 * pi));
+                      } else {
+                        h = 3.0 + (i % 4) * 3.0;
+                      }
+                      return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 2), decoration: BoxDecoration(color: waveColor.withValues(alpha: isPlaying ? 1.0 : 0.5), borderRadius: BorderRadius.circular(1)));
+                    }));
+                  },
+                )),
+              ] else ...[
+                AnimatedBuilder(
+                  animation: _voiceWaveCtrl,
+                  builder: (_, __) {
+                    return Row(mainAxisSize: MainAxisSize.min, children: List.generate(barCount, (i) {
+                      double h;
+                      if (isPlaying && !isLoading) {
+                        h = 3 + 12 * (0.5 + 0.5 * sin(i * 0.8 + _voiceWaveCtrl.value * 2 * pi));
+                      } else {
+                        h = 3.0 + (i % 4) * 3.0;
+                      }
+                      return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 2), decoration: BoxDecoration(color: waveColor.withValues(alpha: isPlaying ? 1.0 : 0.5), borderRadius: BorderRadius.circular(1)));
+                    }));
+                  },
+                ),
+                const SizedBox(width: 8),
+                if (isUploading)
+                  const SizedBox(width: 16, height: 16, child: CupertinoActivityIndicator(radius: 7))
+                else if (uploadFailed)
+                  Icon(Icons.error_outline, size: 16, color: iconColor)
+                else
+                  AnimatedBuilder(
+                    animation: _voiceWaveCtrl,
+                    builder: (_, __) {
+                      if (isPlaying && !isLoading) {
+                        return Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) {
+                          final h = 6 + 8 * (0.5 + 0.5 * sin(i * 1.5 + _voiceWaveCtrl.value * 2 * pi));
+                          return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 1.5), decoration: BoxDecoration(color: waveColor, borderRadius: BorderRadius.circular(1)));
+                        }));
+                      }
+                      return Icon(Icons.play_arrow, size: 18, color: iconColor);
+                    },
+                  ),
+              ],
+              const SizedBox(width: 6),
+              Text(
+                fmtVoiceTime(voiceDuration),
+                style: TextStyle(fontSize: 12, color: iconColor),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -706,7 +1032,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
         ),
       ),
-      child: Text(msg['content'] ?? '', style: const TextStyle(fontSize: 15, color: Color(0xFF222222), height: 1.5)),
+      child: buildEmojiRichText(msg['content'] ?? '', style: const TextStyle(fontSize: 15, color: Color(0xFF222222), height: 1.5), emojiSize: 24),
     );
   }
 
@@ -714,48 +1040,151 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     return Container(
       padding: const EdgeInsets.only(left: 6, right: 6, top: 6, bottom: 6),
       decoration: const BoxDecoration(color: Color(0xFFF7F7F7), border: Border(top: BorderSide(color: Color(0xFFDFDFDF), width: 0.5))),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(width: 36, height: 36, child: GestureDetector(onTap: () {}, behavior: HitTestBehavior.opaque, child: const Center(child: Icon(Icons.mic_none, size: 24, color: Color(0xFF666666))))),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 72, minHeight: 36),
-              child: TextField(
-                controller: _msgCtrl,
-                focusNode: _focusNode,
-                style: const TextStyle(fontSize: 16, height: 1.3),
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: '输入消息...',
-                  hintStyle: const TextStyle(fontSize: 16, color: Color(0xFFCCCCCC), height: 1.3),
-                  filled: true, fillColor: Colors.white, isDense: true,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              SizedBox(width: 36, height: 36, child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isVoiceMode = !_isVoiceMode;
+                    if (_isVoiceMode) {
+                      _focusNode.unfocus();
+                      _hidePlusPanel();
+                      _showEmojiPanel = false;
+                    }
+                  });
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Center(child: Icon(_isVoiceMode ? Icons.keyboard_outlined : Icons.mic_none, size: 24, color: const Color(0xFF666666))),
+              )),
+              const SizedBox(width: 4),
+              if (_isVoiceMode)
+                Expanded(
+                  child: GestureDetector(
+                    onLongPressStart: (_) => _startRecording(),
+                    onLongPressMoveUpdate: (details) {
+                      final dy = details.globalPosition.dy;
+                      final screenHeight = MediaQuery.of(context).size.height;
+                      final cancelThreshold = screenHeight - 200;
+                      final shouldCancel = dy < cancelThreshold;
+                      if (shouldCancel != _recordCancelled) {
+                        setState(() => _recordCancelled = shouldCancel);
+                      }
+                    },
+                    onLongPressEnd: (_) => _stopRecording(cancel: _recordCancelled),
+                    child: Container(
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _isRecording ? (_recordCancelled ? const Color(0xFFFF4444) : const Color(0xFFE0E0E0)) : Colors.white,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: const Color(0xFFDFDFDF), width: 0.5),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _isRecording
+                            ? (_recordCancelled ? '松开手指，取消发送' : '手指上滑，取消发送')
+                            : '按住 说话',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: _isRecording ? (_recordCancelled ? Colors.white : const Color(0xFF666666)) : const Color(0xFF666666),
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: Container(
+                    constraints: const BoxConstraints(maxHeight: 72, minHeight: 36),
+                    child: ExtendedTextField(
+                      controller: _msgCtrl,
+                      focusNode: _focusNode,
+                      style: const TextStyle(fontSize: 16, height: 1.3),
+                      maxLines: null,
+                      specialTextSpanBuilder: ChatEmojiSpanBuilder(),
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(
+                        hintText: '输入消息...',
+                        hintStyle: const TextStyle(fontSize: 16, color: Color(0xFFCCCCCC), height: 1.3),
+                        filled: true, fillColor: Colors.white, isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Color(0xFFDFDFDF), width: 0.5)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              const SizedBox(width: 4),
+              SizedBox(width: 36, height: 36, child: GestureDetector(
+                onTap: () {
+                  if (_showEmojiPanel) {
+                    setState(() => _showEmojiPanel = false);
+                    _focusNode.requestFocus();
+                  } else {
+                    _focusNode.unfocus();
+                    setState(() {
+                      _showPlusPanel = false;
+                      _showEmojiPanel = true;
+                    });
+                  }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Center(child: Icon(_showEmojiPanel ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, size: 24, color: const Color(0xFF666666))),
+              )),
+              if (!_hasText && !_isVoiceMode) SizedBox(width: 36, height: 36, child: GestureDetector(onTap: _togglePlusPanel, behavior: HitTestBehavior.opaque, child: const Center(child: Icon(Icons.add_circle_outline, size: 24, color: Color(0xFF666666))))),
+              if (_hasText)
+                GestureDetector(
+                  onTapDown: (_) => _sendBtnCtrl.reverse(),
+                  onTapUp: (_) { _sendBtnCtrl.forward(); _sendMessage(); },
+                  onTapCancel: () => _sendBtnCtrl.forward(),
+                  child: ScaleTransition(
+                    scale: _sendBtnCtrl,
+                    child: Container(
+                      height: 36, padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(color: const Color(0xFF07C160), borderRadius: BorderRadius.circular(4)),
+                      alignment: Alignment.center,
+                      child: const Text('发送', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w500, height: 1.0)),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 4),
-          if (!_hasText) SizedBox(width: 36, height: 36, child: GestureDetector(onTap: _togglePlusPanel, behavior: HitTestBehavior.opaque, child: const Center(child: Icon(Icons.add_circle_outline, size: 24, color: Color(0xFF666666))))),
-          if (_hasText)
-            GestureDetector(
-              onTapDown: (_) => _sendBtnCtrl.reverse(),
-              onTapUp: (_) { _sendBtnCtrl.forward(); _sendMessage(); },
-              onTapCancel: () => _sendBtnCtrl.forward(),
-              child: ScaleTransition(
-                scale: _sendBtnCtrl,
-                child: Container(
-                  height: 36, padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(color: const Color(0xFF07C160), borderRadius: BorderRadius.circular(4)),
-                  alignment: Alignment.center,
-                  child: const Text('发送', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w500, height: 1.0)),
-                ),
+          if (_isRecording)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _recordCancelled ? const Color(0xFFFFF0F0) : const Color(0xFFF0F0F0),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: BoxDecoration(
+                      color: _recordCancelled ? const Color(0xFFFF4444) : const Color(0xFF07C160),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _recordCancelled
+                        ? '松开取消发送'
+                        : '正在录制 ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _recordCancelled ? const Color(0xFFFF4444) : const Color(0xFF333333),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
@@ -768,6 +1197,39 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       color: const Color(0xFFF7F7F7),
       padding: EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 12 + bottomPad),
       child: Row(children: [_plusPanelItem(Icons.image_outlined, '图片', _sendImage)]),
+    );
+  }
+
+  Widget _buildChatEmojiPanel() {
+    return Container(
+      height: 250,
+      color: const Color(0xFFF5F5F5),
+      child: GridView.builder(
+        padding: const EdgeInsets.all(12),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 8,
+          childAspectRatio: 1,
+        ),
+        itemCount: emojiAssets.length,
+        itemBuilder: (ctx, i) => GestureDetector(
+          onTap: () {
+            _emojiInserting = true;
+            final filename = emojiAssets[i].split('/').last;
+            final marker = '[emoji:$filename]';
+            final text = _msgCtrl.text;
+            final cursorPos = _msgCtrl.selection.start;
+            final insertPos = cursorPos < 0 ? text.length : cursorPos;
+            _msgCtrl.text = text.substring(0, insertPos) + marker + text.substring(insertPos);
+            _msgCtrl.selection = TextSelection.collapsed(offset: insertPos + marker.length);
+            setState(() { _hasText = _msgCtrl.text.isNotEmpty; });
+            Future.microtask(() => _emojiInserting = false);
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Image.asset(emojiAssets[i], fit: BoxFit.contain),
+          ),
+        ),
+      ),
     );
   }
 
@@ -833,11 +1295,45 @@ class _MsgBubbleWrapper extends StatelessWidget {
   }
 
   Widget _buildAvatar(String url, String name, int id, double radius) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: url.isNotEmpty
-          ? CachedNetworkImage(imageUrl: url, width: radius * 2, height: radius * 2, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500))))
-          : Container(width: radius * 2, height: radius * 2, color: getColorForId(id), alignment: Alignment.center, child: Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500))),
+    return CircleAvatar(
+      radius: radius,
+      backgroundImage: url.isNotEmpty ? CachedNetworkImageProvider(url) : null,
+      backgroundColor: url.isEmpty ? getColorForId(id) : null,
+      child: url.isEmpty ? Text(name.isNotEmpty ? name[0] : '?', style: TextStyle(fontSize: radius * 0.7, color: Colors.white, fontWeight: FontWeight.w500)) : null,
     );
+  }
+}
+
+class ChatEmojiText extends SpecialText {
+  static const String flag = '[emoji:';
+  final int startIndex;
+
+  ChatEmojiText(TextStyle? textStyle, {SpecialTextGestureTapCallback? onTap, required this.startIndex})
+      : super(flag, ']', textStyle, onTap: onTap);
+
+  @override
+  InlineSpan finishText() {
+    final key = getContent();
+    final assetPath = 'assets/emojis/$key';
+    return ImageSpan(
+      AssetImage(assetPath),
+      actualText: toString(),
+      start: startIndex,
+      imageWidth: 22,
+      imageHeight: 22,
+      fit: BoxFit.contain,
+      alignment: PlaceholderAlignment.middle,
+    );
+  }
+}
+
+class ChatEmojiSpanBuilder extends SpecialTextSpanBuilder {
+  @override
+  SpecialText? createSpecialText(String flag, {TextStyle? textStyle, SpecialTextGestureTapCallback? onTap, int? index}) {
+    if (isStart(flag, ChatEmojiText.flag)) {
+      final startIndex = (index ?? 0) - ChatEmojiText.flag.length + 1;
+      return ChatEmojiText(textStyle, onTap: onTap, startIndex: startIndex);
+    }
+    return null;
   }
 }

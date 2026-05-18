@@ -67,7 +67,7 @@ wss.on('connection', (ws, req) => {
 				return
 			}
 			if (data.type === 'chat') {
-				const { conversation_id, content, msg_type } = data
+				const { conversation_id, content, msg_type, voice_duration } = data
 				if (!conversation_id || !content) return
 
 				const [memberCheck] = await db.query(
@@ -77,8 +77,8 @@ wss.on('connection', (ws, req) => {
 				if (!memberCheck.length) return
 
 				const [result] = await db.query(
-					'INSERT INTO chat_messages (conversation_id, sender_id, content, type) VALUES (?, ?, ?, ?)',
-					[conversation_id, userId, content, msg_type || 1]
+					'INSERT INTO chat_messages (conversation_id, sender_id, content, type, voice_duration) VALUES (?, ?, ?, ?, ?)',
+					[conversation_id, userId, content, msg_type || 1, voice_duration || null]
 				)
 
 				const [senderRows] = await db.query('SELECT nickname, avatar FROM users WHERE id = ?', [userId])
@@ -92,6 +92,7 @@ wss.on('connection', (ws, req) => {
 					sender_avatar: sender.avatar || '',
 					content,
 					type: msg_type || 1,
+					voice_duration: voice_duration || 0,
 					is_recalled: 0,
 					created_at: new Date().toISOString(),
 				}
@@ -159,7 +160,7 @@ async function autoInit() {
 	const DB_PASS = process.env.DB_PASS || '123456'
 
 	// 1. 先不指定数据库连接，创建数据库
-	const conn = await mysql.createConnection({ host: DB_HOST, port: DB_PORT, user: DB_USER, password: DB_PASS })
+	const conn = await mysql.createConnection({ host: DB_HOST, port: DB_PORT, user: DB_USER, password: DB_PASS, timezone: '+08:00' })
 	await conn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
 	await conn.end()
 	console.log(`  [初始化] 数据库 "${DB_NAME}" 已就绪`)
@@ -263,6 +264,8 @@ async function autoInit() {
 			parent_id INT UNSIGNED DEFAULT NULL COMMENT '父评论ID',
 			content VARCHAR(500) NOT NULL,
 			image_url VARCHAR(500) DEFAULT '',
+			voice_url VARCHAR(500) DEFAULT '',
+			voice_duration INT UNSIGNED DEFAULT 0,
 			likes_count INT UNSIGNED NOT NULL DEFAULT 0,
 			status TINYINT NOT NULL DEFAULT 1,
 			location VARCHAR(100) DEFAULT '' COMMENT 'IP属地',
@@ -480,9 +483,12 @@ async function autoInit() {
 		{ table: 'posts', column: 'pinned_category_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "在哪个分类置顶"' },
 		{ table: 'comments', column: 'location', definition: 'VARCHAR(100) DEFAULT "" COMMENT "IP属地"' },
 		{ table: 'comments', column: 'is_pinned', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0普通 1置顶"' },
+		{ table: 'comments', column: 'voice_url', definition: 'VARCHAR(500) DEFAULT ""' },
+		{ table: 'comments', column: 'voice_duration', definition: 'INT UNSIGNED NOT NULL DEFAULT 0' },
 		{ table: 'users', column: 'location', definition: 'VARCHAR(100) DEFAULT "" COMMENT "IP属地"' },
 		{ table: 'chat_members', column: 'is_pinned', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0普通 1置顶"' },
 		{ table: 'chat_members', column: 'is_hidden', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0正常 1隐藏"' },
+		{ table: 'chat_messages', column: 'voice_duration', definition: 'INT UNSIGNED NOT NULL DEFAULT 0 COMMENT "语音时长(秒)"' },
 	]
 	for (const m of migrations) {
 		try {

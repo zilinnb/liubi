@@ -5,6 +5,8 @@ class Comment {
   final int parentId;
   final String content;
   final String imageUrl;
+  final String voiceUrl;
+  final int voiceDuration;
   int likesCount;
   final int status;
   final String location;
@@ -22,6 +24,8 @@ class Comment {
     this.parentId = 0,
     this.content = '',
     this.imageUrl = '',
+    this.voiceUrl = '',
+    this.voiceDuration = 0,
     this.likesCount = 0,
     this.status = 1,
     this.location = '',
@@ -47,6 +51,8 @@ class Comment {
       parentId: json['parent_id'] ?? 0,
       content: json['content'] ?? '',
       imageUrl: json['image_url'] ?? '',
+      voiceUrl: json['voice_url'] ?? '',
+      voiceDuration: json['voice_duration'] ?? 0,
       likesCount: json['likes_count'] ?? 0,
       status: json['status'] ?? 1,
       location: json['location'] ?? '',
@@ -67,6 +73,8 @@ class Comment {
       'parent_id': parentId,
       'content': content,
       'image_url': imageUrl,
+      'voice_url': voiceUrl,
+      'voice_duration': voiceDuration,
       'likes_count': likesCount,
       'status': status,
       'location': location,

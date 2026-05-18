@@ -7,6 +7,7 @@ class Conversation {
   final int createdBy;
   int unreadCount;
   final String lastMessage;
+  final int? lastMessageType;
   final String lastTime;
   final String updatedAt;
   final List<String> memberAvatars;
@@ -25,6 +26,7 @@ class Conversation {
     this.createdBy = 0,
     this.unreadCount = 0,
     this.lastMessage = '',
+    this.lastMessageType,
     this.lastTime = '',
     this.updatedAt = '',
     this.memberAvatars = const [],
@@ -63,6 +65,7 @@ class Conversation {
       createdBy: json['created_by'] ?? 0,
       unreadCount: json['unread_count'] ?? 0,
       lastMessage: json['last_message'] ?? '',
+      lastMessageType: json['last_message_type'] is int ? json['last_message_type'] : null,
       lastTime: json['last_time'] ?? '',
       updatedAt: json['updated_at'] ?? '',
       memberAvatars: avatars,
@@ -84,6 +87,7 @@ class Conversation {
       'created_by': createdBy,
       'unread_count': unreadCount,
       'last_message': lastMessage,
+      'last_message_type': lastMessageType,
       'last_time': lastTime,
       'updated_at': updatedAt,
       'member_avatars': memberAvatars,

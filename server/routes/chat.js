@@ -38,6 +38,8 @@ router.get('/conversations', auth, async (req, res) => {
 				item.last_message = '[系统消息]'
 			} else if (c.last_message_type === 2) {
 				item.last_message = '[图片]'
+			} else if (c.last_message_type === 4) {
+				item.last_message = '[语音]'
 			}
 			if (c.type === 1) {
 				const [other] = await db.query(

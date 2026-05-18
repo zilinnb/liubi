@@ -168,7 +168,7 @@ class _MineScreenState extends State<MineScreen>
           body: NestedScrollView(
             headerSliverBuilder: (ctx, _) => [
               SliverAppBar(
-                expandedHeight: statusBarH + 210,
+                expandedHeight: statusBarH + 185,
                 pinned: true,
                 floating: false,
                 snap: false,
@@ -347,7 +347,7 @@ class _MineScreenState extends State<MineScreen>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final curH = constraints.biggest.height;
-      final totalExpand = statusBarH + 210.0;
+      final totalExpand = statusBarH + 185.0;
       final cp =
           (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0))
               .clamp(0.0, 1.0);
@@ -533,12 +533,10 @@ class _MineScreenState extends State<MineScreen>
                     _buildExpandableBio(bio),
                   ],
                   if (location.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('IP属地: $location',
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.white60)),
+                    const SizedBox(height: 12),
+                    Text('IP属地: $location', style: const TextStyle(fontSize: 11, color: Colors.white60)),
                   ],
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -582,8 +580,7 @@ class _MineScreenState extends State<MineScreen>
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 0.5),
                           ),
-                          child: const Text('编辑资料',
-                              style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
+                          child: const Text('编辑资料', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -596,8 +593,7 @@ class _MineScreenState extends State<MineScreen>
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 0.5),
                           ),
-                          child: const Text('设置',
-                              style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
+                          child: const Text('设置', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w500)),
                         ),
                       ),
                     ],

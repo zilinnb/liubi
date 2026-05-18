@@ -1,7 +1,7 @@
 name: liubi
 description: "留笔 - 标记我的生活"
 publish_to: 'none'
-version: 0.0.5+104
+version: 0.0.6+105
 
 environment:
   sdk: ^3.11.5
@@ -33,6 +33,10 @@ dependencies:
   flutter_local_notifications: ^18.0.0
   webview_flutter: ^4.10.0
   gal: ^2.3.0
+  video_player: ^2.9.2
+  wechat_assets_picker: ^10.1.2
+  photo_manager: ^3.9.0
+  extended_text_field: ^16.0.0
 
 dev_dependencies:
   flutter_test:
@@ -51,3 +55,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/
+    - assets/emojis/

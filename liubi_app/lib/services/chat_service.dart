@@ -100,7 +100,7 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('[ChatService] 已主动断开连接');
   }
 
-  Future<void> sendMessage(int conversationId, String content, int msgType) async {
+  Future<void> sendMessage(int conversationId, String content, int msgType, {int? voiceDuration}) async {
     if (!_isConnected || _channel == null) {
       debugPrint('[ChatService] 未连接，尝试重连...');
       await connect();
@@ -110,12 +110,17 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    final message = json.encode({
+    final msgData = {
       'type': 'chat',
       'conversation_id': conversationId,
       'content': content,
       'msg_type': msgType,
-    });
+    };
+    if (voiceDuration != null && msgType == 4) {
+      msgData['voice_duration'] = voiceDuration;
+    }
+
+    final message = json.encode(msgData);
 
     _channel!.sink.add(message);
     debugPrint('[ChatService] 已发送消息: type=chat, conv=$conversationId');

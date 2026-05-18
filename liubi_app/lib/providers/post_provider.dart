@@ -167,7 +167,9 @@ class PostProvider with ChangeNotifier {
         return {'code': 200, 'post': Post.fromJson(res['data'] as Map<String, dynamic>)};
       }
       return {'code': res['code'], 'msg': res['msg'] ?? '', 'data': res['data']};
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[PostProvider] fetchPostById error: $e');
+    }
     return {'code': 500, 'msg': '网络错误'};
   }
 
@@ -301,12 +303,16 @@ class PostProvider with ChangeNotifier {
     int? parentId,
     required String content,
     String imageUrl = '',
+    String voiceUrl = '',
+    int voiceDuration = 0,
   }) async {
     return await ApiService().post('/comments', data: {
       'post_id': postId,
       'parent_id': parentId,
       'content': content,
       'image_url': imageUrl,
+      'voice_url': voiceUrl,
+      'voice_duration': voiceDuration,
     });
   }
 

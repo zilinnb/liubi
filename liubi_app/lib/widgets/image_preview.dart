@@ -1,6 +1,13 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_player/video_player.dart';
+import 'package:dio/dio.dart';
+import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart';
+import '../utils/helpers.dart';
+import '../widgets/app_toast.dart';
 
 class ImagePreview {
   static void open(
@@ -8,6 +15,7 @@ class ImagePreview {
     required String url,
     String? heroTag,
     Rect? sourceRect,
+    String? liveVideoUrl,
   }) {
     Navigator.of(context).push(
       PageRouteBuilder(
@@ -20,6 +28,7 @@ class ImagePreview {
           heroTag: heroTag,
           sourceRect: sourceRect,
           animation: animation,
+          liveVideoUrl: liveVideoUrl,
         ),
         transitionsBuilder: (_, animation, __, child) {
           return child;
@@ -34,12 +43,14 @@ class _PreviewPage extends StatefulWidget {
   final String? heroTag;
   final Rect? sourceRect;
   final Animation<double> animation;
+  final String? liveVideoUrl;
 
   const _PreviewPage({
     required this.url,
     this.heroTag,
     this.sourceRect,
     required this.animation,
+    this.liveVideoUrl,
   });
 
   @override
@@ -47,35 +58,161 @@ class _PreviewPage extends StatefulWidget {
 }
 
 class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderStateMixin {
-  double _scale = 1.0;
-  double _prevScale = 1.0;
-  Offset _offset = Offset.zero;
-  bool _isDragging = false;
+  VideoPlayerController? _videoCtrl;
+  bool _videoPlaying = false;
+  bool _videoInitialized = false;
+  bool _isSavingImage = false;
+
+  bool get _isLive => widget.liveVideoUrl != null && widget.liveVideoUrl!.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isLive) {
+      _initVideo();
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoCtrl?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initVideo() async {
+    if (!_isLive || _videoCtrl != null) return;
+    _videoCtrl = VideoPlayerController.networkUrl(Uri.parse(fullUrl(widget.liveVideoUrl!)));
+    try {
+      await _videoCtrl!.initialize();
+      _videoCtrl!.setLooping(false);
+      _videoCtrl!.addListener(_onVideoEnd);
+      if (mounted) setState(() => _videoInitialized = true);
+    } catch (_) {
+      _videoCtrl?.dispose();
+      _videoCtrl = null;
+    }
+  }
+
+  void _onVideoEnd() {
+    if (_videoCtrl != null && !_videoCtrl!.value.isPlaying && _videoCtrl!.value.position >= _videoCtrl!.value.duration) {
+      if (_videoPlaying && mounted) {
+        setState(() => _videoPlaying = false);
+      }
+    }
+  }
+
+  void _toggleLivePlay() {
+    if (_videoPlaying) {
+      _videoCtrl?.pause();
+      _videoCtrl?.seekTo(Duration.zero);
+      setState(() => _videoPlaying = false);
+    } else {
+      if (!_videoInitialized) {
+        _initVideo().then((_) {
+          if (_videoCtrl != null && _videoInitialized) {
+            _videoCtrl!.seekTo(Duration.zero);
+            _videoCtrl!.play();
+            setState(() => _videoPlaying = true);
+          }
+        });
+      } else {
+        _videoCtrl!.seekTo(Duration.zero);
+        _videoCtrl!.play();
+        setState(() => _videoPlaying = true);
+      }
+    }
+  }
+
+  void _showSaveDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 32, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(children: [
+              Expanded(child: _actionItem(Icons.save_alt, '保存图片', const Color(0xFF333333), () {
+                Navigator.pop(ctx);
+                _saveImage();
+              })),
+            ]),
+          ),
+          const Divider(height: 0.5, color: Color(0xFFF0F0F0)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.pop(ctx),
+            child: Container(
+              width: double.infinity,
+              height: 50,
+              alignment: Alignment.center,
+              child: const Text('取消', style: TextStyle(fontSize: 16, color: Color(0xFF666666), fontWeight: FontWeight.w500)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _actionItem(IconData icon, String label, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(color: const Color(0xFFF5F5F5), shape: BoxShape.circle),
+            child: Icon(icon, size: 22, color: color),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _saveImage() async {
+    if (_isSavingImage) return;
+    setState(() => _isSavingImage = true);
+    try {
+      final response = await Dio().get(widget.url, options: Options(responseType: ResponseType.bytes));
+      final dir = await getTemporaryDirectory();
+      final filePath = '${dir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final file = File(filePath);
+      await file.writeAsBytes(response.data);
+      await Gal.putImage(filePath, album: '留笔');
+      if (mounted) {
+        AppToast.success(context, message: '已保存到相册');
+      }
+      try { await file.delete(); } catch (_) {}
+    } catch (e) {
+      if (mounted) AppToast.error(context, message: '保存失败');
+    } finally {
+      if (mounted) setState(() => _isSavingImage = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
     final statusBarH = MediaQuery.of(context).padding.top;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
 
     Widget imageWidget = InteractiveViewer(
       minScale: 0.5,
       maxScale: 4.0,
-      onInteractionStart: (details) {
-        if (details.pointerCount == 1) {
-          _prevScale = _scale;
-        }
-      },
-      onInteractionUpdate: (details) {
-        if (details.pointerCount == 1 && _scale == 1.0) {
-          setState(() => _isDragging = true);
-        }
-      },
       onInteractionEnd: (details) {
-        if (_scale <= 1.0 && details.velocity.pixelsPerSecond.distance > 300) {
+        if (details.velocity.pixelsPerSecond.distance > 300) {
           Navigator.pop(context);
-          return;
         }
-        setState(() => _isDragging = false);
       },
       child: CachedNetworkImage(
         imageUrl: widget.url,
@@ -110,6 +247,7 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
               children: [
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
+                  onLongPress: _showSaveDialog,
                   behavior: HitTestBehavior.opaque,
                   child: SizedBox.expand(
                     child: widget.heroTag == null
@@ -117,7 +255,19 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
                             opacity: CurvedAnimation(parent: widget.animation, curve: Curves.easeOut),
                             child: ScaleTransition(
                               scale: Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: widget.animation, curve: Curves.easeOut)),
-                              child: imageWidget,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  imageWidget,
+                                  if (_videoPlaying && _videoCtrl != null && _videoInitialized)
+                                    Center(
+                                      child: AspectRatio(
+                                        aspectRatio: _videoCtrl!.value.aspectRatio,
+                                        child: VideoPlayer(_videoCtrl!),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           )
                         : Center(child: imageWidget),
@@ -141,6 +291,34 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
                     ),
                   ),
                 ),
+                if (_isLive)
+                  Positioned(
+                    left: 16,
+                    bottom: bottomPad + 24,
+                    child: FadeTransition(
+                      opacity: CurvedAnimation(parent: widget.animation, curve: Curves.easeOut),
+                      child: GestureDetector(
+                        onTap: _toggleLivePlay,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: _videoPlaying
+                                ? const Color(0xFFFF2442).withValues(alpha: 0.85)
+                                : Colors.white.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Image.asset('assets/icons/icon_live_photo.png', width: 14, height: 14, color: _videoPlaying ? Colors.white : const Color(0xFF333333)),
+                              const SizedBox(width: 3),
+                              Text('LIVE', style: TextStyle(fontSize: 10, color: _videoPlaying ? Colors.white : const Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           );
