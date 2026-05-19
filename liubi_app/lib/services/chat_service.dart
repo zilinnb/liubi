@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'storage_service.dart';
 import 'notification_service.dart';
+import '../utils/emoji_text.dart';
 
 class ChatService extends ChangeNotifier with WidgetsBindingObserver {
   ChatService._internal();
@@ -185,7 +186,8 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
     String displayContent = content;
     final msgType = data['type'] as int? ?? 1;
     if (msgType == 2) displayContent = '[图片]';
-    if (msgType == 3) displayContent = '[语音]';
+    if (msgType == 4) displayContent = '[语音]';
+    if (msgType == 1 && emojiRegexp.hasMatch(content)) displayContent = '[表情]';
 
     final title = senderName.isNotEmpty ? senderName : '新消息';
     final payload = 'chat:$convId';
@@ -291,7 +293,12 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
           } else {
             final pid = targetId is int ? targetId : int.tryParse(targetId.toString());
             if (pid != null) {
-              navigatorKey.currentState?.pushNamed('/detail', arguments: pid);
+              final commentId = data['comment_id'];
+              final cid = commentId is int ? commentId : int.tryParse(commentId?.toString() ?? '');
+              navigatorKey.currentState?.pushNamed('/detail', arguments: {
+                'postId': pid,
+                if (cid != null) 'highlightCommentId': cid,
+              });
             }
           }
         },

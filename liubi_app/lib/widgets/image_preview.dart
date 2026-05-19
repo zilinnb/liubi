@@ -10,6 +10,8 @@ import '../utils/helpers.dart';
 import '../widgets/app_toast.dart';
 
 class ImagePreview {
+  static final Map<String, VideoPlayerController> _videoCache = {};
+
   static void open(
     BuildContext context, {
     required String url,
@@ -29,12 +31,20 @@ class ImagePreview {
           sourceRect: sourceRect,
           animation: animation,
           liveVideoUrl: liveVideoUrl,
+          videoCache: _videoCache,
         ),
         transitionsBuilder: (_, animation, __, child) {
           return child;
         },
       ),
     );
+  }
+
+  static void clearCache() {
+    for (final ctrl in _videoCache.values) {
+      ctrl.dispose();
+    }
+    _videoCache.clear();
   }
 }
 
@@ -44,6 +54,7 @@ class _PreviewPage extends StatefulWidget {
   final Rect? sourceRect;
   final Animation<double> animation;
   final String? liveVideoUrl;
+  final Map<String, VideoPlayerController> videoCache;
 
   const _PreviewPage({
     required this.url,
@@ -51,6 +62,7 @@ class _PreviewPage extends StatefulWidget {
     this.sourceRect,
     required this.animation,
     this.liveVideoUrl,
+    required this.videoCache,
   });
 
   @override
@@ -61,6 +73,7 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
   VideoPlayerController? _videoCtrl;
   bool _videoPlaying = false;
   bool _videoInitialized = false;
+  bool _videoLoading = false;
   bool _isSavingImage = false;
 
   bool get _isLive => widget.liveVideoUrl != null && widget.liveVideoUrl!.isNotEmpty;
@@ -75,52 +88,73 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
 
   @override
   void dispose() {
-    _videoCtrl?.dispose();
+    _videoCtrl?.removeListener(_onVideoEnd);
+    if (!_isLive || !_videoInitialized) {
+      _videoCtrl?.dispose();
+    } else if (_videoPlaying) {
+      _videoCtrl?.pause();
+      _videoCtrl?.seekTo(Duration.zero);
+    }
     super.dispose();
   }
 
   Future<void> _initVideo() async {
     if (!_isLive || _videoCtrl != null) return;
+
+    final videoKey = widget.liveVideoUrl!;
+    if (widget.videoCache.containsKey(videoKey)) {
+      _videoCtrl = widget.videoCache[videoKey]!;
+      _videoCtrl!.removeListener(_onVideoEnd);
+      _videoCtrl!.addListener(_onVideoEnd);
+      if (mounted) setState(() => _videoInitialized = true);
+      return;
+    }
+
+    setState(() => _videoLoading = true);
     _videoCtrl = VideoPlayerController.networkUrl(Uri.parse(fullUrl(widget.liveVideoUrl!)));
     try {
       await _videoCtrl!.initialize();
       _videoCtrl!.setLooping(false);
       _videoCtrl!.addListener(_onVideoEnd);
-      if (mounted) setState(() => _videoInitialized = true);
+      widget.videoCache[videoKey] = _videoCtrl!;
+      if (widget.videoCache.length > 10) {
+        final oldest = widget.videoCache.keys.first;
+        widget.videoCache[oldest]?.dispose();
+        widget.videoCache.remove(oldest);
+      }
+      if (mounted) setState(() { _videoInitialized = true; _videoLoading = false; });
     } catch (_) {
       _videoCtrl?.dispose();
       _videoCtrl = null;
+      if (mounted) setState(() { _videoLoading = false; });
     }
   }
 
   void _onVideoEnd() {
     if (_videoCtrl != null && !_videoCtrl!.value.isPlaying && _videoCtrl!.value.position >= _videoCtrl!.value.duration) {
       if (_videoPlaying && mounted) {
+        _videoCtrl?.seekTo(Duration.zero);
         setState(() => _videoPlaying = false);
       }
     }
   }
 
-  void _toggleLivePlay() {
+  void _toggleLivePlay() async {
     if (_videoPlaying) {
       _videoCtrl?.pause();
       _videoCtrl?.seekTo(Duration.zero);
       setState(() => _videoPlaying = false);
-    } else {
-      if (!_videoInitialized) {
-        _initVideo().then((_) {
-          if (_videoCtrl != null && _videoInitialized) {
-            _videoCtrl!.seekTo(Duration.zero);
-            _videoCtrl!.play();
-            setState(() => _videoPlaying = true);
-          }
-        });
-      } else {
-        _videoCtrl!.seekTo(Duration.zero);
-        _videoCtrl!.play();
-        setState(() => _videoPlaying = true);
-      }
+      return;
     }
+
+    if (!_videoInitialized) {
+      await _initVideo();
+      if (!_videoInitialized || _videoCtrl == null) return;
+    }
+
+    _videoCtrl!.seekTo(Duration.zero);
+    _videoCtrl!.play();
+    setState(() => _videoPlaying = true);
   }
 
   void _showSaveDialog() {
@@ -183,6 +217,11 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
   Future<void> _saveImage() async {
     if (_isSavingImage) return;
     setState(() => _isSavingImage = true);
+    showCupertinoDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CupertinoActivityIndicator(radius: 14, color: Color(0xFFFF2442))),
+    );
     try {
       final response = await Dio().get(widget.url, options: Options(responseType: ResponseType.bytes));
       final dir = await getTemporaryDirectory();
@@ -191,11 +230,15 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
       await file.writeAsBytes(response.data);
       await Gal.putImage(filePath, album: '留笔');
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         AppToast.success(context, message: '已保存到相册');
       }
       try { await file.delete(); } catch (_) {}
     } catch (e) {
-      if (mounted) AppToast.error(context, message: '保存失败');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        AppToast.error(context, message: '保存失败');
+      }
     } finally {
       if (mounted) setState(() => _isSavingImage = false);
     }
@@ -246,7 +289,15 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
             child: Stack(
               children: [
                 GestureDetector(
-                  onTap: () => Navigator.pop(context),
+                  onTap: () {
+                    if (_videoPlaying) {
+                      _videoCtrl?.pause();
+                      _videoCtrl?.seekTo(Duration.zero);
+                      setState(() => _videoPlaying = false);
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  },
                   onLongPress: _showSaveDialog,
                   behavior: HitTestBehavior.opaque,
                   child: SizedBox.expand(
@@ -300,9 +351,11 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
                       child: GestureDetector(
                         onTap: _toggleLivePlay,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
-                            color: _videoPlaying
+                            color: _videoLoading
+                                ? const Color(0xFFFF9800).withValues(alpha: 0.85)
+                                : _videoPlaying
                                 ? const Color(0xFFFF2442).withValues(alpha: 0.85)
                                 : Colors.white.withValues(alpha: 0.85),
                             borderRadius: BorderRadius.circular(14),
@@ -310,9 +363,20 @@ class _PreviewPageState extends State<_PreviewPage> with SingleTickerProviderSta
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Image.asset('assets/icons/icon_live_photo.png', width: 14, height: 14, color: _videoPlaying ? Colors.white : const Color(0xFF333333)),
+                              if (_videoLoading)
+                                const SizedBox(width: 14, height: 14, child: CupertinoActivityIndicator(radius: 5, color: Colors.white))
+                              else
+                                Image.asset('assets/icons/icon_live_photo.png', width: 14, height: 14, color: _videoPlaying ? Colors.white : const Color(0xFF333333)),
                               const SizedBox(width: 3),
-                              Text('LIVE', style: TextStyle(fontSize: 10, color: _videoPlaying ? Colors.white : const Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                              Text(
+                                _videoLoading ? '...' : 'LIVE',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: (_videoLoading || _videoPlaying) ? Colors.white : const Color(0xFF333333),
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
                             ],
                           ),
                         ),

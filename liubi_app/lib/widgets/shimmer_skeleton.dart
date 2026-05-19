@@ -143,7 +143,9 @@ class MasonrySkeletonGrid extends StatelessWidget {
     return ShimmerLoading(
       child: Padding(
         padding: padding,
-        child: Column(
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
           children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -173,6 +175,7 @@ class MasonrySkeletonGrid extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }

@@ -1,7 +1,7 @@
 name: liubi
 description: "留笔 - 标记我的生活"
 publish_to: 'none'
-version: 0.0.6+105
+version: 0.0.7+106
 
 environment:
   sdk: ^3.11.5
@@ -37,6 +37,7 @@ dependencies:
   wechat_assets_picker: ^10.1.2
   photo_manager: ^3.9.0
   extended_text_field: ^16.0.0
+  flutter_native_splash: ^2.4.6
 
 dev_dependencies:
   flutter_test:
@@ -50,6 +51,15 @@ flutter_launcher_icons:
   image_path: "assets/icons/app_icon.png"
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/icons/app_icon.png"
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  fullscreen: true
+  android_12:
+    color: "#FFFFFF"
+    image: "assets/icons/splash_android12.png"
+    image_dark: "assets/icons/splash_android12.png"
+  android_screen_orientation: portrait
 
 flutter:
   uses-material-design: true

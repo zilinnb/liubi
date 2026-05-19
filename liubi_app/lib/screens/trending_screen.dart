@@ -17,9 +17,8 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   List<Post> _latestPosts = [];
   bool _loading = true;
   int _sortIdx = 0;
-  double _navOpacity = 0.0;
   bool _showBackTop = false;
-  bool _scrollScheduled = false;
+  final ValueNotifier<double> _collapse = ValueNotifier(0);
 
   late TabController _sortTabCtrl;
   final ScrollController _scrollCtrl = ScrollController();
@@ -36,7 +35,6 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
         if (_currentPosts.isEmpty) _loadTrending();
       }
     });
-    _scrollCtrl.addListener(_onScroll);
     _loadTrending();
   }
 
@@ -44,35 +42,14 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   void dispose() {
     _sortTabCtrl.dispose();
     _scrollCtrl.dispose();
+    _collapse.dispose();
     super.dispose();
   }
 
   List<Post> get _currentPosts => _sortIdx == 0 ? _hotPosts : _latestPosts;
 
-  void _onScroll() {
-    if (!_scrollCtrl.hasClients || _scrollScheduled) return;
-    _scrollScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollScheduled = false;
-      if (!_scrollCtrl.hasClients || !mounted) return;
-      final offset = _scrollCtrl.offset;
-      final statusBarH = MediaQuery.of(context).padding.top;
-      final headerHeight = statusBarH + 160;
-      final progress = (offset / headerHeight).clamp(0.0, 1.0);
-      final show = offset > 300;
-      if ((progress - _navOpacity).abs() > 0.01 || show != _showBackTop) {
-        setState(() {
-          _navOpacity = progress;
-          _showBackTop = show;
-        });
-      }
-    });
-  }
-
   void _scrollToTop() {
-    if (_scrollCtrl.hasClients) {
-      _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
-    }
+    _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
   }
 
   Future<void> _loadTrending() async {
@@ -97,60 +74,53 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   Widget build(BuildContext context) {
     final statusBarH = MediaQuery.of(context).padding.top;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
-          CustomScrollView(
-            controller: _scrollCtrl,
-            slivers: [
-              SliverToBoxAdapter(child: _buildHeader(statusBarH)),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _SortTabDelegate(tabController: _sortTabCtrl),
-              ),
-              if (_loading)
-                const SliverFillRemaining(child: Center(child: CupertinoActivityIndicator(radius: 14)))
-              else if (_currentPosts.isEmpty)
-                const SliverFillRemaining(child: Center(child: Text('暂无热门内容', style: TextStyle(fontSize: 14, color: Color(0xFF999999)))))
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                  sliver: SliverMasonryGrid.count(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 6,
-                    childCount: _currentPosts.length,
-                    itemBuilder: (_, i) {
-                      return PostCard(
-                        post: _currentPosts[i],
-                        onTap: () => Navigator.pushNamed(context, '/detail', arguments: _currentPosts[i].id),
-                        onLike: (_) {},
-                      );
-                    },
-                  ),
+          NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification is ScrollUpdateNotification) {
+                final show = notification.metrics.pixels > 300;
+                if (show != _showBackTop) {
+                  setState(() => _showBackTop = show);
+                }
+              }
+              return false;
+            },
+            child: NestedScrollView(
+              controller: _scrollCtrl,
+              headerSliverBuilder: (ctx, _) => [
+                SliverAppBar(
+                  expandedHeight: statusBarH + 140,
+                  pinned: true,
+                  floating: false,
+                  snap: false,
+                  toolbarHeight: 44,
+                  backgroundColor: Colors.white,
+                  surfaceTintColor: Colors.transparent,
+                  scrolledUnderElevation: 0,
+                  elevation: 0,
+                  automaticallyImplyLeading: false,
+                  leadingWidth: 46,
+                  titleSpacing: 0,
+                  leading: _buildNavLeading(),
+                  title: _buildNavTitle(),
+                  flexibleSpace: _buildFlexibleSpace(statusBarH),
                 ),
-              const SliverToBoxAdapter(child: SizedBox(height: 80)),
-            ],
-          ),
-          if (_navOpacity > 0.3)
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: Container(
-                padding: EdgeInsets.only(top: statusBarH),
-                color: Colors.white.withValues(alpha: _navOpacity > 0.5 ? 1.0 : _navOpacity * 2),
-                height: statusBarH + 44,
-                child: SizedBox(
-                  height: 44,
-                  child: Row(
-                    children: [
-                      GestureDetector(onTap: () => Navigator.pop(context), child: const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Icon(Icons.arrow_back, size: 20, color: Color(0xFF222222)))),
-                      Expanded(child: Center(child: Text('热门榜单', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))))),
-                      const SizedBox(width: 46),
-                    ],
-                  ),
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _TrendingTabDelegate(tabCtrl: _sortTabCtrl),
                 ),
+              ],
+              body: TabBarView(
+                controller: _sortTabCtrl,
+                children: [
+                  _buildPostList(_hotPosts),
+                  _buildPostList(_latestPosts),
+                ],
               ),
             ),
+          ),
           if (_showBackTop)
             Positioned(
               right: 16, bottom: 80,
@@ -172,38 +142,112 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildHeader(double statusBarH) {
-    return Container(
-      height: statusBarH + 160,
-      decoration: const BoxDecoration(
-        color: Color(0xFFFF2442),
-      ),
-      child: Stack(
+  Widget _buildNavLeading() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _collapse,
+      builder: (_, cp, __) {
+        final iconColor = Color.lerp(Colors.white, const Color(0xFF333333), cp);
+        return GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Icon(Icons.arrow_back, size: 22, color: iconColor),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildNavTitle() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _collapse,
+      builder: (_, cp, __) {
+        return Opacity(
+          opacity: cp.clamp(0.0, 1.0),
+          child: const Text('热门榜单',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+        );
+      },
+    );
+  }
+
+  Widget _buildFlexibleSpace(double statusBarH) {
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final curH = constraints.biggest.height;
+      final totalExpand = statusBarH + 140.0;
+      final cp =
+          (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if ((_collapse.value - cp).abs() > 0.01) _collapse.value = cp;
+      });
+
+      final infoOpacity = (1 - cp * 1.5).clamp(0.0, 1.0);
+
+      return Stack(
         fit: StackFit.expand,
+        clipBehavior: Clip.hardEdge,
         children: [
-          Positioned(
-            top: statusBarH, left: 0, right: 0,
-            child: SizedBox(
-              height: 44,
-              child: Row(
-                children: [
-                  GestureDetector(onTap: () => Navigator.pop(context), child: const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Icon(Icons.arrow_back, size: 20, color: Colors.white))),
-                  Expanded(child: Center(child: Text('热门榜单', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)))),
-                  const SizedBox(width: 46),
-                ],
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFF2442), Color(0xFFFF5A6E), Color(0xFFFF8A9E)],
               ),
             ),
           ),
           Positioned(
-            left: 0, right: 0, bottom: 30,
-            child: Column(
-              children: [
-                const Icon(Icons.trending_up, size: 40, color: Colors.white),
-                const SizedBox(height: 6),
-                const Text('热门内容排行榜', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
-                const SizedBox(height: 2),
-                Text('共 ${_currentPosts.length} 条', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.8))),
-              ],
+            top: statusBarH + 44,
+            left: 16,
+            right: 16,
+            child: Opacity(
+              opacity: infoOpacity,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 8),
+                  const Icon(Icons.trending_up, size: 36, color: Colors.white),
+                  const SizedBox(height: 6),
+                  const Text('热门内容排行榜', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text('共 ${_currentPosts.length} 条', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.8))),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  Widget _buildPostList(List<Post> posts) {
+    if (_loading) {
+      return const Center(child: CupertinoActivityIndicator(radius: 14, color: Color(0xFFFF2442)));
+    }
+    if (posts.isEmpty) {
+      return const Center(child: Text('暂无热门内容', style: TextStyle(fontSize: 14, color: Color(0xFF999999))));
+    }
+    return RefreshIndicator(
+      color: const Color(0xFFFF2442),
+      onRefresh: _loadTrending,
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
+            sliver: SliverMasonryGrid.count(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childCount: posts.length,
+              itemBuilder: (_, i) {
+                return PostCard(
+                  post: posts[i],
+                  onTap: () => Navigator.pushNamed(context, '/detail', arguments: posts[i].id),
+                  onLike: (_) {},
+                );
+              },
             ),
           ),
         ],
@@ -212,30 +256,33 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   }
 }
 
-class _SortTabDelegate extends SliverPersistentHeaderDelegate {
-  final TabController tabController;
-  _SortTabDelegate({required this.tabController});
+class _TrendingTabDelegate extends SliverPersistentHeaderDelegate {
+  final TabController tabCtrl;
+  _TrendingTabDelegate({required this.tabCtrl});
 
   @override
-  double get minExtent => 40;
+  double get minExtent => 46;
   @override
-  double get maxExtent => 40;
+  double get maxExtent => 46;
 
   @override
-  bool shouldRebuild(covariant _SortTabDelegate oldDelegate) => false;
+  bool shouldRebuild(covariant _TrendingTabDelegate oldDelegate) => tabCtrl != oldDelegate.tabCtrl;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 0.5))),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+      ),
       child: TabBar(
-        controller: tabController,
-        labelColor: const Color(0xFFFF2442),
-        unselectedLabelColor: const Color(0xFF666666),
+        controller: tabCtrl,
+        labelColor: const Color(0xFF222222),
+        unselectedLabelColor: const Color(0xFF999999),
         indicatorColor: const Color(0xFFFF2442),
         indicatorSize: TabBarIndicatorSize.label,
-        indicatorWeight: 2,
-        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        indicatorWeight: 2.5,
+        dividerColor: Colors.transparent,
+        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
         tabs: const [Tab(text: '最热'), Tab(text: '最新')],
       ),

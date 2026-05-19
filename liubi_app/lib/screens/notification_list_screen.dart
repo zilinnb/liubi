@@ -153,7 +153,16 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
         final list = res['data'] as List? ?? [];
         final items = list.map((e) => e as Map<String, dynamic>).toList();
         if (widget.type == 'follow') {
-          for (final item in items) {
+          final seen = <int>{};
+          final deduped = <Map<String, dynamic>>[];
+          for (final item in items.reversed) {
+            final userId = item['from_user_id'] as int? ?? 0;
+            if (userId > 0 && !seen.contains(userId)) {
+              seen.add(userId);
+              deduped.insert(0, item);
+            }
+          }
+          for (final item in deduped) {
             final userId = item['from_user_id'] as int? ?? 0;
             if (userId > 0 && item['is_followed'] == null) {
               try {
@@ -165,12 +174,18 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
               } catch (_) {}
             }
           }
+          setState(() {
+            _notifications.addAll(deduped);
+            if (deduped.length < 20) _noMore = true;
+            _loading = false;
+          });
+        } else {
+          setState(() {
+            _notifications.addAll(items);
+            if (list.length < 20) _noMore = true;
+            _loading = false;
+          });
         }
-        setState(() {
-          _notifications.addAll(items);
-          if (list.length < 20) _noMore = true;
-          _loading = false;
-        });
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -190,22 +205,29 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
             color: Colors.white,
             child: SizedBox(
               height: 44,
-              child: Stack(
-                alignment: Alignment.center,
+              child: Row(
                 children: [
-                  Positioned(
-                    left: 0,
-                    child: GestureDetector(onTap: () => Navigator.pop(context), child: const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Icon(Icons.arrow_back, size: 20, color: Color(0xFF222222)))),
-                  ),
-                  Text(_title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
-                  if (hasUnread)
-                    Positioned(
-                      right: 0,
-                      child: GestureDetector(
-                        onTap: _markAllRead,
-                        child: const Padding(padding: EdgeInsets.symmetric(horizontal: 14), child: Text('一键已读', style: TextStyle(fontSize: 13, color: Color(0xFFFF2442), fontWeight: FontWeight.w500))),
-                      ),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    behavior: HitTestBehavior.opaque,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Icon(Icons.arrow_back, size: 20, color: Color(0xFF222222)),
                     ),
+                  ),
+                  Expanded(
+                    child: Text(_title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+                  ),
+                  if (hasUnread)
+                    GestureDetector(
+                      onTap: _markAllRead,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14),
+                        child: Text('一键已读', style: TextStyle(fontSize: 13, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 44),
                 ],
               ),
             ),
@@ -314,6 +336,7 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
     final isFollowed = notif['is_followed'] == true;
     final isFan = notif['is_fan'] == true;
     final isMutual = isFollowed && isFan;
+    final commentId = notif['comment_id'] as int?;
 
     return GestureDetector(
       onTap: () {
@@ -322,7 +345,10 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
           setState(() { notif['is_read'] = 1; });
         }
         if (targetId != null && !isFollow) {
-          Navigator.pushNamed(context, '/detail', arguments: targetId);
+          Navigator.pushNamed(context, '/detail', arguments: {
+            'postId': targetId,
+            if (commentId != null) 'highlightCommentId': commentId,
+          });
         } else if (isFollow && userId > 0) {
           Navigator.pushNamed(context, '/user-profile', arguments: userId);
         }

@@ -339,4 +339,37 @@ router.put('/ai-config', async (req, res) => {
 	}
 })
 
+// AI绘画配置
+router.get('/ai-image-config', async (req, res) => {
+	try {
+		const [rows] = await db.query('SELECT * FROM ai_image_config ORDER BY id DESC LIMIT 1')
+		if (rows.length) {
+			const c = rows[0]
+			res.json({ code: 200, data: { id: c.id, api_url: c.api_url, api_key: c.api_key, model_name: c.model_name, enabled: c.enabled } })
+		} else {
+			res.json({ code: 200, data: { id: 0, api_url: 'https://api.openai.com/v1/images/generations', api_key: '', model_name: 'gpt-image-2', enabled: 0 } })
+		}
+	} catch (e) {
+		res.json({ code: 500, msg: '获取失败' })
+	}
+})
+
+router.put('/ai-image-config', async (req, res) => {
+	try {
+		const { api_url, api_key, model_name, enabled } = req.body
+		const [rows] = await db.query('SELECT id FROM ai_image_config ORDER BY id DESC LIMIT 1')
+		if (rows.length) {
+			await db.query('UPDATE ai_image_config SET api_url=?, api_key=?, model_name=?, enabled=? WHERE id=?',
+				[api_url || '', api_key || '', model_name || 'gpt-image-2', enabled !== undefined ? enabled : 0, rows[0].id])
+		} else {
+			await db.query('INSERT INTO ai_image_config (api_url, api_key, model_name, enabled) VALUES (?,?,?,?)',
+				[api_url || 'https://api.openai.com/v1/images/generations', api_key || '', model_name || 'gpt-image-2', enabled !== undefined ? enabled : 0])
+		}
+		res.json({ code: 200, msg: '保存成功' })
+	} catch (e) {
+		console.error(e)
+		res.json({ code: 500, msg: '保存失败' })
+	}
+})
+
 module.exports = router

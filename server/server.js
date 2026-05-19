@@ -78,7 +78,7 @@ wss.on('connection', (ws, req) => {
 
 				const [result] = await db.query(
 					'INSERT INTO chat_messages (conversation_id, sender_id, content, type, voice_duration) VALUES (?, ?, ?, ?, ?)',
-					[conversation_id, userId, content, msg_type || 1, voice_duration || null]
+					[conversation_id, userId, content, msg_type || 1, voice_duration || 0]
 				)
 
 				const [senderRows] = await db.query('SELECT nickname, avatar FROM users WHERE id = ?', [userId])
@@ -423,14 +423,42 @@ async function autoInit() {
 			enabled TINYINT NOT NULL DEFAULT 1 COMMENT '0禁用 1启用',
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS ai_image_config (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			api_url VARCHAR(500) NOT NULL DEFAULT 'https://api.openai.com/v1/images/generations',
+			api_key VARCHAR(500) NOT NULL DEFAULT '',
+			model_name VARCHAR(100) NOT NULL DEFAULT 'gpt-image-2',
+			enabled TINYINT NOT NULL DEFAULT 1 COMMENT '0禁用 1启用',
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS ai_image_history (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			user_id INT UNSIGNED NOT NULL,
+			prompt TEXT NOT NULL,
+			image_url VARCHAR(1000) DEFAULT NULL,
+			status ENUM('pending','generating','completed','failed') NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_user (user_id),
+			INDEX idx_user_time (user_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS ai_chat_history (
 			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 			user_id INT UNSIGNED NOT NULL,
 			role ENUM('user','assistant') NOT NULL,
 			content TEXT NOT NULL,
+			is_liked TINYINT NOT NULL DEFAULT 0 COMMENT '0未点赞 1已点赞',
+			is_disliked TINYINT NOT NULL DEFAULT 0 COMMENT '0未点踩 1已点踩',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_user (user_id),
 			INDEX idx_user_time (user_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS ai_conversations (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			user_id INT UNSIGNED NOT NULL,
+			title VARCHAR(200) NOT NULL DEFAULT '新对话',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			INDEX idx_user (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	]
 
@@ -489,6 +517,9 @@ async function autoInit() {
 		{ table: 'chat_members', column: 'is_pinned', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0普通 1置顶"' },
 		{ table: 'chat_members', column: 'is_hidden', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0正常 1隐藏"' },
 		{ table: 'chat_messages', column: 'voice_duration', definition: 'INT UNSIGNED NOT NULL DEFAULT 0 COMMENT "语音时长(秒)"' },
+		{ table: 'users', column: 'email_notify', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0关闭 1开启邮件通知"' },
+		{ table: 'messages', column: 'comment_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "关联评论ID"' },
+		{ table: 'ai_chat_history', column: 'conversation_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "对话ID"' },
 	]
 	for (const m of migrations) {
 		try {
@@ -532,6 +563,7 @@ app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
+app.use('/uploads/thumbs', express.static(path.join(__dirname, 'uploads', 'thumbs')))
 
 // API路由
 app.use('/api/auth', require('./routes/auth'))

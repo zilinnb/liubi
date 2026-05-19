@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
+const { sendNotificationEmail } = require('../utils/mailer')
 
 router.get('/', auth, async (req, res) => {
 	try {
@@ -73,11 +74,56 @@ router.post('/read-all', auth, async (req, res) => {
 	}
 })
 
+router.get('/email-settings', auth, async (req, res) => {
+	try {
+		const [rows] = await db.query('SELECT email_notify, email FROM users WHERE id = ?', [req.user.id])
+		if (!rows.length) return res.json({ code: 404, msg: '用户不存在' })
+		const row = rows[0]
+		res.json({ code: 200, data: { email_notify: row.email_notify || 0, email: row.email || '' } })
+	} catch(e) {
+		console.error('get email settings error:', e)
+		res.json({ code: 500, msg: '获取邮件设置失败' })
+	}
+})
+
+router.post('/email-settings', auth, async (req, res) => {
+	try {
+		const { email_notify } = req.body
+		if (typeof email_notify === 'undefined') return res.json({ code: 400, msg: '参数缺失' })
+		const [rows] = await db.query('SELECT email FROM users WHERE id = ?', [req.user.id])
+		if (!rows.length) return res.json({ code: 404, msg: '用户不存在' })
+		if (email_notify === 1 && !rows[0].email) return res.json({ code: 400, msg: '请先绑定邮箱' })
+		await db.query('UPDATE users SET email_notify = ? WHERE id = ?', [email_notify ? 1 : 0, req.user.id])
+		res.json({ code: 200, msg: 'ok' })
+	} catch(e) {
+		console.error('update email settings error:', e)
+		res.json({ code: 500, msg: '更新邮件设置失败' })
+	}
+})
+
 async function createNotification(toUserId, fromUserId, type, content, targetId) {
 	if (!toUserId || !fromUserId || toUserId === fromUserId) return
 	const [exists] = await db.query('SELECT id FROM messages WHERE to_user_id = ? AND from_user_id = ? AND type = ? AND target_id = ? AND is_read = 0', [toUserId, fromUserId, type, targetId || 0])
 	if (exists.length > 0) return
 	await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, ?, ?, ?)', [fromUserId, toUserId, type, content || '', targetId || null])
+
+	if ([1, 2, 3, 6].includes(type)) {
+		try {
+			const [targetRows] = await db.query('SELECT email_notify, email FROM users WHERE id = ?', [toUserId])
+			const [fromRows] = await db.query('SELECT nickname FROM users WHERE id = ?', [fromUserId])
+			if (targetRows.length && targetRows[0].email_notify === 1 && targetRows[0].email) {
+				let targetTitle = ''
+				if (targetId && [1, 2, 6].includes(type)) {
+					const [postRows] = await db.query('SELECT title FROM posts WHERE id = ?', [targetId])
+					if (postRows.length) targetTitle = postRows[0].title
+				}
+				const fromUserName = fromRows.length ? fromRows[0].nickname : '用户'
+				sendNotificationEmail(targetRows[0].email, fromUserName, type, targetTitle, content || '')
+			}
+		} catch(e) {
+			console.error('send notification email error:', e)
+		}
+	}
 }
 
 module.exports = { router, createNotification }

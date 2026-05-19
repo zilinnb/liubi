@@ -67,6 +67,24 @@ router.get('/mention-search', auth, async (req, res) => {
 	}
 })
 
+// 获取关注状态（必须在 /:id 之前）
+router.get('/:id/follow-status', auth, async (req, res) => {
+	try {
+		const targetId = req.params.id
+		const [follow] = await db.query(
+			'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
+			[req.user.id, targetId]
+		)
+		const [fan] = await db.query(
+			'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
+			[targetId, req.user.id]
+		)
+		res.json({ code: 200, data: { is_followed: follow.length > 0, is_fan: fan.length > 0 } })
+	} catch (e) {
+		res.json({ code: 500, msg: '服务器错误' })
+	}
+})
+
 // 获取用户信息（含隐私控制）
 router.get('/:id', async (req, res) => {
 	try {
@@ -139,6 +157,7 @@ router.post('/:id/follow', auth, async (req, res) => {
 			await db.query('INSERT INTO follows (follower_id, following_id) VALUES (?, ?)', [req.user.id, targetId])
 			await db.query('UPDATE users SET follow_count = follow_count + 1 WHERE id = ?', [req.user.id])
 			await db.query('UPDATE users SET fans_count = fans_count + 1 WHERE id = ?', [targetId])
+			await db.query('DELETE FROM messages WHERE from_user_id = ? AND to_user_id = ? AND type = 3', [req.user.id, targetId])
 			await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content) VALUES (?, ?, 3, ?)',
 				[req.user.id, targetId, '关注了你'])
 			pushNotification(db, targetId, 3, req.user.id, null)

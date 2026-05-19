@@ -20,7 +20,11 @@ import '../services/storage_service.dart';
 import '../utils/helpers.dart';
 import '../utils/emoji_text.dart';
 import '../utils/emoji_assets.dart';
+import '../widgets/emoji_picker_panel.dart';
 import 'package:extended_text_field/extended_text_field.dart';
+import 'package:dio/dio.dart';
+import 'package:gal/gal.dart';
+import '../widgets/app_toast.dart';
 
 class ChatScreen extends StatefulWidget {
   final int conversationId;
@@ -563,6 +567,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       labels.add('复制');
       callbacks.add(() { _dismissMenu(); Clipboard.setData(ClipboardData(text: msg['content'] ?? '')); });
     }
+    if (msgType == 2) {
+      labels.add('保存');
+      callbacks.add(() { _dismissMenu(); _saveChatImage(msg['content'] ?? ''); });
+    }
     if (canRecall) {
       labels.add('撤回');
       callbacks.add(() { _dismissMenu(); _recallMessage(msg['id'] as int?); });
@@ -634,6 +642,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     _menuEntry?.remove();
     _menuEntry = null;
     if (!_menuCtrl.isDismissed) _menuCtrl.reset();
+  }
+
+  Future<void> _saveChatImage(String imageUrl) async {
+    final url = fullUrl(imageUrl);
+    if (url.isEmpty) return;
+    showCupertinoDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CupertinoActivityIndicator(radius: 14, color: Color(0xFFFF2442))),
+    );
+    try {
+      final response = await Dio().get(url, options: Options(responseType: ResponseType.bytes));
+      final dir = await getTemporaryDirectory();
+      final filePath = '${dir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final file = File(filePath);
+      await file.writeAsBytes(Uint8List.fromList(response.data));
+      await Gal.putImage(filePath, album: '留笔');
+      try { await file.delete(); } catch (_) {}
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        AppToast.success(context, message: '已保存到相册');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        AppToast.error(context, message: '保存失败');
+      }
+    }
   }
 
   void _showGroupInfo() async {
@@ -755,7 +791,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     final statusBarH = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
     final up = Provider.of<UserProvider>(context);
-    final panelHeight = _showPlusPanel ? 100.0 + bottomPad : (_showEmojiPanel ? 250.0 : 0.0);
+    final panelHeight = _showPlusPanel ? 100.0 + bottomPad : (_showEmojiPanel ? 260.0 : 0.0);
     return Scaffold(
       backgroundColor: const Color(0xFFEBEBEB),
       resizeToAvoidBottomInset: true,
@@ -924,16 +960,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       final msgIndex = _messages.indexOf(msg);
       final isPlaying = _playingVoiceIdx == msgIndex;
       final isLoading = isPlaying && _voiceLoading;
-      final barCount = (voiceDuration.clamp(1, 20) + 5).clamp(5, 20);
+      final bubbleWidth = 80.0 + (voiceDuration.clamp(1, 60) / 60.0 * 80.0);
       final bubbleColor = isSelf ? const Color(0xFF95EC69) : const Color(0xFFFFFFFF);
       final iconColor = isSelf ? const Color(0xFF222222) : const Color(0xFF666666);
-      final waveColor = isSelf ? const Color(0xFF222222) : const Color(0xFF666666);
 
       return GestureDetector(
         onTap: () => _toggleVoicePlayback(msgIndex, msg),
         child: Container(
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.55, minWidth: 100),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          width: bubbleWidth.clamp(80.0, 160.0),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: bubbleColor,
             borderRadius: BorderRadius.only(
@@ -943,79 +978,33 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
             children: [
               if (isSelf) ...[
                 if (isUploading)
-                  const SizedBox(width: 16, height: 16, child: CupertinoActivityIndicator(radius: 7))
+                  const SizedBox(width: 14, height: 14, child: CupertinoActivityIndicator(radius: 6))
                 else if (uploadFailed)
-                  Icon(Icons.error_outline, size: 16, color: iconColor)
-                else
-                  AnimatedBuilder(
-                    animation: _voiceWaveCtrl,
-                    builder: (_, __) {
-                      if (isPlaying && !isLoading) {
-                        return Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) {
-                          final h = 6 + 8 * (0.5 + 0.5 * sin(i * 1.5 + _voiceWaveCtrl.value * 2 * pi));
-                          return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 1.5), decoration: BoxDecoration(color: waveColor, borderRadius: BorderRadius.circular(1)));
-                        }));
-                      }
-                      return Icon(Icons.play_arrow, size: 18, color: iconColor);
-                    },
-                  ),
-                const SizedBox(width: 8),
-                Flexible(child: AnimatedBuilder(
-                  animation: _voiceWaveCtrl,
-                  builder: (_, __) {
-                    return Row(mainAxisSize: MainAxisSize.min, children: List.generate(barCount, (i) {
-                      double h;
-                      if (isPlaying && !isLoading) {
-                        h = 3 + 12 * (0.5 + 0.5 * sin(i * 0.8 + _voiceWaveCtrl.value * 2 * pi));
-                      } else {
-                        h = 3.0 + (i % 4) * 3.0;
-                      }
-                      return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 2), decoration: BoxDecoration(color: waveColor.withValues(alpha: isPlaying ? 1.0 : 0.5), borderRadius: BorderRadius.circular(1)));
-                    }));
-                  },
-                )),
-              ] else ...[
-                AnimatedBuilder(
-                  animation: _voiceWaveCtrl,
-                  builder: (_, __) {
-                    return Row(mainAxisSize: MainAxisSize.min, children: List.generate(barCount, (i) {
-                      double h;
-                      if (isPlaying && !isLoading) {
-                        h = 3 + 12 * (0.5 + 0.5 * sin(i * 0.8 + _voiceWaveCtrl.value * 2 * pi));
-                      } else {
-                        h = 3.0 + (i % 4) * 3.0;
-                      }
-                      return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 2), decoration: BoxDecoration(color: waveColor.withValues(alpha: isPlaying ? 1.0 : 0.5), borderRadius: BorderRadius.circular(1)));
-                    }));
-                  },
+                  Icon(Icons.error_outline, size: 14, color: iconColor),
+                if (isUploading || uploadFailed) const SizedBox(width: 4),
+                Text(
+                  '$voiceDuration"',
+                  style: TextStyle(fontSize: 13, color: iconColor, fontWeight: FontWeight.w400),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+                _buildVoiceWaves(isPlaying, isLoading, iconColor),
+              ] else ...[
+                _buildVoiceWaves(isPlaying, isLoading, iconColor),
+                const SizedBox(width: 6),
+                Text(
+                  '$voiceDuration"',
+                  style: TextStyle(fontSize: 13, color: iconColor, fontWeight: FontWeight.w400),
+                ),
+                if (isUploading || uploadFailed) const SizedBox(width: 4),
                 if (isUploading)
-                  const SizedBox(width: 16, height: 16, child: CupertinoActivityIndicator(radius: 7))
+                  const SizedBox(width: 14, height: 14, child: CupertinoActivityIndicator(radius: 6))
                 else if (uploadFailed)
-                  Icon(Icons.error_outline, size: 16, color: iconColor)
-                else
-                  AnimatedBuilder(
-                    animation: _voiceWaveCtrl,
-                    builder: (_, __) {
-                      if (isPlaying && !isLoading) {
-                        return Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) {
-                          final h = 6 + 8 * (0.5 + 0.5 * sin(i * 1.5 + _voiceWaveCtrl.value * 2 * pi));
-                          return Container(width: 2.5, height: h, margin: const EdgeInsets.only(right: 1.5), decoration: BoxDecoration(color: waveColor, borderRadius: BorderRadius.circular(1)));
-                        }));
-                      }
-                      return Icon(Icons.play_arrow, size: 18, color: iconColor);
-                    },
-                  ),
+                  Icon(Icons.error_outline, size: 14, color: iconColor),
               ],
-              const SizedBox(width: 6),
-              Text(
-                fmtVoiceTime(voiceDuration),
-                style: TextStyle(fontSize: 12, color: iconColor),
-              ),
             ],
           ),
         ),
@@ -1033,6 +1022,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
         ),
       ),
       child: buildEmojiRichText(msg['content'] ?? '', style: const TextStyle(fontSize: 15, color: Color(0xFF222222), height: 1.5), emojiSize: 24),
+    );
+  }
+
+  Widget _buildVoiceWaves(bool isPlaying, bool isLoading, Color color) {
+    return AnimatedBuilder(
+      animation: _voiceWaveCtrl,
+      builder: (_, __) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            double h;
+            if (isPlaying && !isLoading) {
+              h = 4 + 10 * (0.5 + 0.5 * sin(i * 1.2 + _voiceWaveCtrl.value * 2 * pi));
+            } else {
+              h = [4.0, 12.0, 7.0][i];
+            }
+            return Container(
+              width: 3,
+              height: h,
+              margin: const EdgeInsets.symmetric(horizontal: 1.5),
+              decoration: BoxDecoration(
+                color: isPlaying && !isLoading ? color : color.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 
@@ -1201,35 +1218,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildChatEmojiPanel() {
-    return Container(
-      height: 250,
-      color: const Color(0xFFF5F5F5),
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 8,
-          childAspectRatio: 1,
-        ),
-        itemCount: emojiAssets.length,
-        itemBuilder: (ctx, i) => GestureDetector(
-          onTap: () {
-            _emojiInserting = true;
-            final filename = emojiAssets[i].split('/').last;
-            final marker = '[emoji:$filename]';
-            final text = _msgCtrl.text;
-            final cursorPos = _msgCtrl.selection.start;
-            final insertPos = cursorPos < 0 ? text.length : cursorPos;
-            _msgCtrl.text = text.substring(0, insertPos) + marker + text.substring(insertPos);
-            _msgCtrl.selection = TextSelection.collapsed(offset: insertPos + marker.length);
-            setState(() { _hasText = _msgCtrl.text.isNotEmpty; });
-            Future.microtask(() => _emojiInserting = false);
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Image.asset(emojiAssets[i], fit: BoxFit.contain),
-          ),
-        ),
-      ),
+    return EmojiPickerPanel(
+      onEmojiSelected: (assetPath) {
+        _emojiInserting = true;
+        final filename = assetPath.split('/').last;
+        final marker = '[emoji:$filename]';
+        final text = _msgCtrl.text;
+        final cursorPos = _msgCtrl.selection.start;
+        final insertPos = cursorPos < 0 ? text.length : cursorPos;
+        _msgCtrl.text = text.substring(0, insertPos) + marker + text.substring(insertPos);
+        _msgCtrl.selection = TextSelection.collapsed(offset: insertPos + marker.length);
+        setState(() { _hasText = _msgCtrl.text.isNotEmpty; });
+        Future.microtask(() => _emojiInserting = false);
+      },
     );
   }
 

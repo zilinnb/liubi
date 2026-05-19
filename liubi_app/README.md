@@ -1,17 +1,62 @@
-# liubi
+# 留笔 (Liubi)
 
-A new Flutter project.
+一款记录生活的社交应用。
 
-## Getting Started
+## 版本信息
 
-This project is a starting point for a Flutter application.
+- **版本名**: Beta 0.0.7
+- **版本号**: 106
 
-A few resources to get you started if this is your first Flutter project:
+## 功能特性
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- 📸 发布图文动态
+- 💬 智能AI助手聊天
+- 🎨 AI绘画生成
+- 👥 关注与粉丝系统
+- 🔍 发现与搜索
+- 💌 消息通知
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 技术栈
+
+- **前端**: Flutter 3.11+
+- **后端**: Node.js + Express
+- **数据库**: MySQL
+- **状态管理**: Provider
+
+## 快速开始
+
+```bash
+# 克隆项目
+git clone https://github.com/your-repo/liubi.git
+
+# 进入项目目录
+cd liubi_app
+
+# 安装依赖
+flutter pub get
+
+# 运行项目
+flutter run
+
+# 打包发布版本
+flutter build apk --release
+```
+
+## 项目结构
+
+```
+liubi_app/
+├── android/          # Android配置
+├── assets/           # 静态资源
+├── lib/
+│   ├── screens/      # 页面组件
+│   ├── widgets/      # 通用组件
+│   ├── services/     # 服务层
+│   ├── providers/    # 状态管理
+│   └── utils/        # 工具函数
+└── pubspec.yaml      # 依赖配置
+```
+
+## License
+
+MIT License

@@ -18,6 +18,7 @@ import '../providers/user_provider.dart';
 import '../utils/helpers.dart';
 import '../utils/image_picker_util.dart';
 import '../utils/emoji_assets.dart';
+import '../widgets/emoji_picker_panel.dart';
 import 'package:extended_text_field/extended_text_field.dart';
 
 class _EditorItem {
@@ -1391,24 +1392,8 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   }
 
   Widget _buildEmojiPanel() {
-    return Container(
-      height: 250,
-      color: const Color(0xFFF5F5F5),
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 8,
-          childAspectRatio: 1,
-        ),
-        itemCount: emojiAssets.length,
-        itemBuilder: (ctx, i) => GestureDetector(
-          onTap: () => _insertGifEmoji(emojiAssets[i]),
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Image.asset(emojiAssets[i], fit: BoxFit.contain),
-          ),
-        ),
-      ),
+    return EmojiPickerPanel(
+      onEmojiSelected: (assetPath) => _insertGifEmoji(assetPath),
     );
   }
 

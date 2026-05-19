@@ -7,6 +7,7 @@ import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../utils/helpers.dart';
+import '../utils/emoji_text.dart';
 import '../models/conversation.dart';
 import 'main_screen.dart';
 
@@ -344,11 +345,8 @@ class _MessageScreenState extends State<MessageScreen> {
     return '${date.year}年${date.month}月';
   }
 
-  static final _emojiPattern = RegExp(r'\[emoji:[^\]]+\]');
-
   String _formatLastMsg(Conversation conv) {
     String msg = conv.lastMessage;
-    // 如果是上传文件路径（.m4a, .jpg 等），显示合适的占位符
     if (msg.startsWith('/uploads/')) {
       if (msg.endsWith('.m4a') || msg.endsWith('.mp3') || msg.endsWith('.wav')) {
         return '[语音]';
@@ -356,8 +354,7 @@ class _MessageScreenState extends State<MessageScreen> {
         return '[图片]';
       }
     }
-    // 其他情况正常处理
-    return msg.replaceAll(_emojiPattern, '[表情]');
+    return stripEmojiMarkers(msg);
   }
 
   Widget _buildConversationItem(Conversation conv) {

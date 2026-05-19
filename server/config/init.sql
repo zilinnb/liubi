@@ -291,3 +291,6 @@ ALTER TABLE posts ADD COLUMN content_blocks JSON DEFAULT NULL COMMENT '块编辑
 
 -- 为已有数据库添加mute_until字段
 ALTER TABLE users ADD COLUMN mute_until DATETIME DEFAULT NULL COMMENT '禁言截止时间';
+
+-- 为已有数据库添加reply_to_user_id字段
+ALTER TABLE comments ADD COLUMN reply_to_user_id INT UNSIGNED DEFAULT NULL COMMENT '回复目标用户ID' AFTER parent_id;

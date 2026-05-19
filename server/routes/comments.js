@@ -41,7 +41,7 @@ router.get('/post/:postId', async (req, res) => {
 		if (sort === 'hot') {
 			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at DESC'
 		} else {
-			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at DESC'
+			orderClause = 'c.is_pinned DESC, c.created_at DESC'
 		}
 
 		const [rows] = await db.query(
@@ -68,15 +68,33 @@ router.get('/post/:postId', async (req, res) => {
 			} catch {}
 		}
 
+		const replyToUserIds = new Set()
+		rows.forEach(r => {
+			if (r.reply_to_user_id) replyToUserIds.add(r.reply_to_user_id)
+		})
+		let replyToUserMap = {}
+		if (replyToUserIds.size) {
+			const [replyUsers] = await db.query('SELECT id, nickname FROM users WHERE id IN (?)', [[...replyToUserIds]])
+			replyUsers.forEach(u => { replyToUserMap[u.id] = u.nickname })
+		}
+
 		const map = {}
 		const list = []
 		rows.forEach(r => {
-			const item = { ...r, is_pinned: Number(r.is_pinned) || 0, subComments: [], isLiked: likedSet.has(r.id) }
+			const item = {
+				...r,
+				is_pinned: Number(r.is_pinned) || 0,
+				subComments: [],
+				isLiked: likedSet.has(r.id),
+				reply_to_nickname: r.reply_to_user_id ? (replyToUserMap[r.reply_to_user_id] || '') : ''
+			}
 			map[r.id] = item
+		})
+		rows.forEach(r => {
 			if (r.parent_id && map[r.parent_id]) {
-				map[r.parent_id].subComments.push(item)
-			} else {
-				list.push(item)
+				map[r.parent_id].subComments.push(map[r.id])
+			} else if (!r.parent_id) {
+				list.push(map[r.id])
 			}
 		})
 
@@ -90,15 +108,15 @@ router.get('/post/:postId', async (req, res) => {
 // 发表评论（支持图片和@提及）
 router.post('/', auth, async (req, res) => {
 	try {
-		const { post_id, parent_id, content, image_url, voice_url, voice_duration } = req.body
+		const { post_id, parent_id, content, image_url, voice_url, voice_duration, reply_to_user_id } = req.body
 		if (!post_id || (!content && !image_url && !voice_url)) return res.json({ code: 400, msg: '参数不完整' })
 
 		const clientIp = getClientIp(req)
 		const location = await getIpLocation(clientIp)
 
 		const [result] = await db.query(
-			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, voice_url, voice_duration, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-			[post_id, req.user.id, parent_id || null, content || '', image_url || '', voice_url || '', voice_duration || 0, location]
+			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, voice_url, voice_duration, location, reply_to_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+			[post_id, req.user.id, parent_id || null, content || '', image_url || '', voice_url || '', voice_duration || 0, location, reply_to_user_id || null]
 		)
 		await db.query('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?', [post_id])
 
@@ -108,16 +126,16 @@ router.post('/', auth, async (req, res) => {
 		if (parent_id) {
 			const [parent] = await db.query('SELECT user_id FROM comments WHERE id = ?', [parent_id])
 			if (parent.length && parent[0].user_id !== req.user.id) {
-				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 2, ?, ?)',
-					[req.user.id, parent[0].user_id, '回复了你的评论', post_id])
-				pushNotification(db, parent[0].user_id, 2, req.user.id, post_id)
+				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id, comment_id) VALUES (?, ?, 2, ?, ?, ?)',
+					[req.user.id, parent[0].user_id, '回复了你的评论', post_id, result.insertId])
+				pushNotification(db, parent[0].user_id, 2, req.user.id, post_id, result.insertId)
 			}
 		} else {
 			const [post] = await db.query('SELECT user_id FROM posts WHERE id = ?', [post_id])
 			if (post.length && post[0].user_id !== req.user.id) {
-				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id) VALUES (?, ?, 2, ?, ?)',
-					[req.user.id, post[0].user_id, '评论了你的笔记', post_id])
-				pushNotification(db, post[0].user_id, 2, req.user.id, post_id)
+				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id, comment_id) VALUES (?, ?, 2, ?, ?, ?)',
+					[req.user.id, post[0].user_id, '评论了你的笔记', post_id, result.insertId])
+				pushNotification(db, post[0].user_id, 2, req.user.id, post_id, result.insertId)
 			}
 		}
 

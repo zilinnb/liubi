@@ -3,6 +3,8 @@ class Comment {
   final int postId;
   final int userId;
   final int parentId;
+  final int replyToUserId;
+  final String replyToNickname;
   final String content;
   final String imageUrl;
   final String voiceUrl;
@@ -22,6 +24,8 @@ class Comment {
     this.postId = 0,
     this.userId = 0,
     this.parentId = 0,
+    this.replyToUserId = 0,
+    this.replyToNickname = '',
     this.content = '',
     this.imageUrl = '',
     this.voiceUrl = '',
@@ -49,6 +53,8 @@ class Comment {
       postId: json['post_id'] ?? 0,
       userId: json['user_id'] ?? 0,
       parentId: json['parent_id'] ?? 0,
+      replyToUserId: json['reply_to_user_id'] ?? 0,
+      replyToNickname: json['reply_to_nickname'] ?? '',
       content: json['content'] ?? '',
       imageUrl: json['image_url'] ?? '',
       voiceUrl: json['voice_url'] ?? '',
@@ -71,6 +77,8 @@ class Comment {
       'post_id': postId,
       'user_id': userId,
       'parent_id': parentId,
+      'reply_to_user_id': replyToUserId,
+      'reply_to_nickname': replyToNickname,
       'content': content,
       'image_url': imageUrl,
       'voice_url': voiceUrl,

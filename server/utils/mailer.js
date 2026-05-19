@@ -62,4 +62,46 @@ async function sendVerifyCode(email, code, typeLabel) {
 	}
 }
 
-module.exports = { sendVerifyCode }
+async function sendNotificationEmail(toEmail, fromUserName, notifType, targetTitle, content) {
+	const tp = getTransporter()
+	if (!tp) {
+		console.warn('[Mailer] 邮件服务未配置，跳过通知邮件')
+		return
+	}
+	const typeLabels = { 1: '赞', 2: '评论', 3: '关注', 6: '收藏' }
+	const typeLabel = typeLabels[notifType] || '互动'
+	const actionTexts = { 1: '赞了你的动态', 2: '评论了你的动态', 3: '关注了你', 6: '收藏了你的动态' }
+	const actionText = actionTexts[notifType] || '与你互动'
+	const html = `
+<div style="max-width:480px;margin:0 auto;padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+	<div style="text-align:center;margin-bottom:24px;">
+		<div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#ff2442,#ff5a6e);display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
+			<span style="color:#fff;font-size:28px;font-weight:800;">留</span>
+		</div>
+		<h1 style="color:#ff2442;font-size:24px;margin:0;">留笔</h1>
+		<p style="color:#999;font-size:14px;margin:4px 0 0;">标记我的生活</p>
+	</div>
+	<div style="background:#f9f9f9;border-radius:12px;padding:24px;">
+		<p style="color:#333;font-size:16px;margin:0 0 12px;"><strong style="color:#ff2442;">${fromUserName}</strong> ${actionText}</p>
+		${targetTitle ? `<div style="background:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;border-left:3px solid #ff2442;"><span style="color:#555;font-size:14px;">${targetTitle}</span></div>` : ''}
+		${content ? `<div style="background:#fff;border-radius:8px;padding:12px 16px;"><span style="color:#666;font-size:14px;">${content}</span></div>` : ''}
+	</div>
+	<p style="color:#ccc;font-size:12px;text-align:center;margin-top:24px;">此邮件由留笔系统自动发送，请勿回复</p>
+</div>`
+
+	try {
+		const fromName = MAIL_FROM || '留笔'
+		const fromEmail = MAIL_USER
+		const info = await tp.sendMail({
+			from: `"${fromName}" <${fromEmail}>`,
+			to: toEmail,
+			subject: `【留笔】${fromUserName}${actionText}`,
+			html
+		})
+		console.log('[Mailer] 通知邮件已发送:', toEmail, info.messageId || '')
+	} catch (e) {
+		console.error('[Mailer] 通知邮件发送失败:', e.message)
+	}
+}
+
+module.exports = { sendVerifyCode, sendNotificationEmail }

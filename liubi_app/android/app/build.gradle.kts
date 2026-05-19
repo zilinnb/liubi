@@ -32,8 +32,8 @@ android {
         applicationId = "com.liubi.liubi"
         minSdk = 24
         targetSdk = 36
-        versionCode = 105
-        versionName = "Beta 0.0.6"
+        versionCode = 106
+        versionName = "Beta 0.0.7"
     }
 
     buildTypes {

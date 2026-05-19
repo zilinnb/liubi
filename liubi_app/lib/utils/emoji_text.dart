@@ -1,7 +1,11 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-final _emojiRegexp = RegExp(r'\[emoji:([^\]]+)\]');
+final emojiRegexp = RegExp(r'\[emoji:([^\]]+)\]');
+
+String stripEmojiMarkers(String text) {
+  return text.replaceAllMapped(emojiRegexp, (m) => '[表情]');
+}
 
 InlineSpan buildEmojiTextSpan(
   String text, {
@@ -9,9 +13,10 @@ InlineSpan buildEmojiTextSpan(
   double emojiSize = 22,
   TapGestureRecognizer? linkRecognizer,
 }) {
-  final emojiMatches = _emojiRegexp.allMatches(text).toList();
+  final emojiMatches = emojiRegexp.allMatches(text).toList();
   if (emojiMatches.isEmpty) {
-    return TextSpan(text: text, style: style, recognizer: linkRecognizer);
+    final cleaned = stripEmojiMarkers(text);
+    return TextSpan(text: cleaned == text ? text : cleaned, style: style, recognizer: linkRecognizer);
   }
 
   final spans = <InlineSpan>[];
@@ -29,13 +34,24 @@ InlineSpan buildEmojiTextSpan(
         width: emojiSize,
         height: emojiSize,
         fit: BoxFit.contain,
-        errorBuilder: (ctx, err, stack) => SizedBox(width: emojiSize, height: emojiSize),
+        errorBuilder: (ctx, err, stack) => Container(
+          width: emojiSize,
+          height: emojiSize,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEEEEEE),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          alignment: Alignment.center,
+          child: Text('😀', style: TextStyle(fontSize: emojiSize * 0.6)),
+        ),
       ),
     ));
     lastEnd = m.end;
   }
   if (lastEnd < text.length) {
-    spans.add(TextSpan(text: text.substring(lastEnd), style: style));
+    final remaining = text.substring(lastEnd);
+    final cleaned = stripEmojiMarkers(remaining);
+    spans.add(TextSpan(text: cleaned, style: style));
   }
   return TextSpan(children: spans, style: style);
 }

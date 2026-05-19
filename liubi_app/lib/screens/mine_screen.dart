@@ -531,6 +531,9 @@ class _MineScreenState extends State<MineScreen>
                   if (bio.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildExpandableBio(bio),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    const Text('这个用户很懒，没有设置签名...', style: TextStyle(fontSize: 13, color: Colors.white60)),
                   ],
                   if (location.isNotEmpty) ...[
                     const SizedBox(height: 12),

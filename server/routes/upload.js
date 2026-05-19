@@ -5,9 +5,11 @@ const fs = require('fs')
 const { auth } = require('../middleware/auth')
 const router = express.Router()
 
-// 确保uploads目录存在
 const uploadDir = path.join(__dirname, '..', 'uploads')
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true })
+
+const thumbDir = path.join(__dirname, '..', 'uploads', 'thumbs')
+if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true })
 
 const storage = multer.diskStorage({
 	destination: (req, file, cb) => cb(null, uploadDir),
@@ -42,20 +44,86 @@ const upload = multer({
 	}
 })
 
-// 多文件上传（图片+视频混合）
-router.post('/', auth, upload.array('files', 18), (req, res) => {
+router.post('/', auth, upload.array('files', 18), async (req, res) => {
 	if (!req.files || !req.files.length) return res.json({ code: 400, msg: '请选择文件' })
-	const list = req.files.map(f => ({
-		url: '/uploads/' + f.filename,
-		type: f.mimetype.startsWith('video/') ? 'video' : (f.mimetype.startsWith('audio/') ? 'audio' : 'image')
-	}))
+	const list = []
+	for (const f of req.files) {
+		const type = f.mimetype.startsWith('video/') ? 'video' : (f.mimetype.startsWith('audio/') ? 'audio' : 'image')
+		const item = { url: '/uploads/' + f.filename, type }
+		if (type === 'image') {
+			try {
+				const thumbUrl = await generateThumb(f.path, f.filename)
+				if (thumbUrl) item.thumb_url = thumbUrl
+			} catch (_) {}
+		}
+		list.push(item)
+	}
 	res.json({ code: 200, data: { list } })
 })
 
-router.post('/single', auth, upload.single('file'), (req, res) => {
+router.post('/single', auth, upload.single('file'), async (req, res) => {
 	if (!req.file) return res.json({ code: 400, msg: '请选择文件' })
 	const type = req.file.mimetype.startsWith('video/') ? 'video' : (req.file.mimetype.startsWith('audio/') ? 'audio' : 'image')
-	res.json({ code: 200, data: { url: '/uploads/' + req.file.filename, type } })
+	const data = { url: '/uploads/' + req.file.filename, type }
+	if (type === 'image') {
+		try {
+			const thumbUrl = await generateThumb(req.file.path, req.file.filename)
+			if (thumbUrl) data.thumb_url = thumbUrl
+		} catch (_) {}
+	}
+	res.json({ code: 200, data })
+})
+
+async function generateThumb(filePath, originalFilename) {
+	try {
+		const sharp = require('sharp')
+		const ext = path.extname(originalFilename)
+		const baseName = path.basename(originalFilename, ext)
+		const thumbFilename = baseName + '_thumb' + ext
+		const thumbPath = path.join(thumbDir, thumbFilename)
+
+		await sharp(filePath)
+			.resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+			.jpeg({ quality: 75 })
+			.toFile(thumbPath)
+
+		return '/uploads/thumbs/' + thumbFilename
+	} catch (_) {
+		return null
+	}
+}
+
+router.get('/thumb', (req, res) => {
+	const src = req.query.src
+	if (!src) return res.status(400).json({ code: 400, msg: '缺少src参数' })
+
+	const imagePath = path.join(__dirname, '..', src.startsWith('/uploads/') ? src : '/uploads/' + src)
+	if (!fs.existsSync(imagePath)) return res.status(404).json({ code: 404, msg: '图片不存在' })
+
+	const ext = path.extname(imagePath).toLowerCase()
+	const baseName = path.basename(imagePath, ext)
+	const thumbFilename = baseName + '_thumb.jpg'
+	const thumbPath = path.join(thumbDir, thumbFilename)
+
+	if (fs.existsSync(thumbPath)) {
+		return res.sendFile(thumbPath)
+	}
+
+	try {
+		const sharp = require('sharp')
+		sharp(imagePath)
+			.resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+			.jpeg({ quality: 75 })
+			.toFile(thumbPath)
+			.then(() => {
+				res.sendFile(thumbPath)
+			})
+			.catch(() => {
+				res.sendFile(imagePath)
+			})
+	} catch (_) {
+		res.sendFile(imagePath)
+	}
 })
 
 module.exports = router

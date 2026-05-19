@@ -39,13 +39,13 @@ class _CategoryScreenState extends State<CategoryScreen> with TickerProviderStat
   final List<bool> _loadingMores = [false, false, false];
 
   final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<double> _scrollOffset = ValueNotifier(0);
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 3, vsync: this);
     _loadCategoryInfo();
-    _scrollController.addListener(_onScroll);
   }
 
   @override
@@ -53,14 +53,15 @@ class _CategoryScreenState extends State<CategoryScreen> with TickerProviderStat
     _tabCtrl.dispose();
     _collapse.dispose();
     _scrollController.dispose();
+    _scrollOffset.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    if (_scrollController.offset > 300 && !_showBackTop) {
-      setState(() => _showBackTop = true);
-    } else if (_scrollController.offset <= 300 && _showBackTop) {
-      setState(() => _showBackTop = false);
+  void _onScrollUpdate(double offset) {
+    _scrollOffset.value = offset;
+    final show = offset > 300;
+    if (show != _showBackTop) {
+      setState(() => _showBackTop = show);
     }
   }
 
@@ -179,38 +180,46 @@ class _CategoryScreenState extends State<CategoryScreen> with TickerProviderStat
           ? const Center(child: CupertinoActivityIndicator(radius: 14, color: Color(0xFFFF2442)))
           : Stack(
               children: [
-                NestedScrollView(
-                  controller: _scrollController,
-                  headerSliverBuilder: (ctx, _) => [
-                    SliverAppBar(
-                      expandedHeight: statusBarH + 150,
-                      pinned: true,
-                      floating: false,
-                      snap: false,
-                      toolbarHeight: 44,
-                      backgroundColor: Colors.white,
-                      surfaceTintColor: Colors.transparent,
-                      scrolledUnderElevation: 0,
-                      elevation: 0,
-                      automaticallyImplyLeading: false,
-                      leadingWidth: 46,
-                      titleSpacing: 0,
-                      leading: _buildNavLeading(),
-                      title: _buildNavTitle(),
-                      flexibleSpace: _buildFlexibleSpace(statusBarH),
-                    ),
-                    SliverPersistentHeader(
-                      pinned: true,
-                      delegate: _TabCardDelegate(tabCtrl: _tabCtrl),
-                    ),
-                  ],
-                  body: TabBarView(
-                    controller: _tabCtrl,
-                    children: [
-                      _buildPostList(0),
-                      _buildPostList(1),
-                      _buildPostList(2),
+                NotificationListener<ScrollNotification>(
+                  onNotification: (notification) {
+                    if (notification is ScrollUpdateNotification) {
+                      _onScrollUpdate(notification.metrics.pixels);
+                    }
+                    return false;
+                  },
+                  child: NestedScrollView(
+                    controller: _scrollController,
+                    headerSliverBuilder: (ctx, _) => [
+                      SliverAppBar(
+                        expandedHeight: statusBarH + 150,
+                        pinned: true,
+                        floating: false,
+                        snap: false,
+                        toolbarHeight: 44,
+                        backgroundColor: Colors.white,
+                        surfaceTintColor: Colors.transparent,
+                        scrolledUnderElevation: 0,
+                        elevation: 0,
+                        automaticallyImplyLeading: false,
+                        leadingWidth: 46,
+                        titleSpacing: 0,
+                        leading: _buildNavLeading(),
+                        title: _buildNavTitle(),
+                        flexibleSpace: _buildFlexibleSpace(statusBarH),
+                      ),
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _TabCardDelegate(tabCtrl: _tabCtrl),
+                      ),
                     ],
+                    body: TabBarView(
+                      controller: _tabCtrl,
+                      children: [
+                        _buildPostList(0),
+                        _buildPostList(1),
+                        _buildPostList(2),
+                      ],
+                    ),
                   ),
                 ),
                 if (_showBackTop)

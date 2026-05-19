@@ -18,6 +18,7 @@ import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/admin_screen.dart';
 import 'screens/ai_chat_screen.dart';
+import 'screens/ai_image_screen.dart';
 import 'screens/follow_list_screen.dart';
 import 'screens/recommend_users_screen.dart';
 import 'screens/trending_screen.dart';
@@ -57,6 +58,8 @@ void main() {
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
     statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
 
   NotificationService.init();
@@ -117,9 +120,20 @@ class LiubiApp extends StatelessWidget {
 
           switch (name) {
             case '/detail':
-              final postId = args is int ? args : int.tryParse(args.toString());
+              int? postId;
+              int? highlightCommentId;
+              if (args is int) {
+                postId = args;
+              } else if (args is Map) {
+                final id = args['postId'] ?? args['id'];
+                postId = id is int ? id : int.tryParse(id.toString());
+                final cid = args['highlightCommentId'];
+                highlightCommentId = cid is int ? cid : int.tryParse(cid?.toString() ?? '');
+              } else {
+                postId = int.tryParse(args.toString());
+              }
               if (postId != null) {
-                return MaterialPageRoute(builder: (_) => DetailScreen(postId: postId), settings: settings);
+                return MaterialPageRoute(builder: (_) => DetailScreen(postId: postId!, highlightCommentId: highlightCommentId), settings: settings);
               }
               return null;
             case '/chat':
@@ -170,6 +184,8 @@ class LiubiApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const AdminScreen(), settings: settings);
             case '/ai-chat':
               return MaterialPageRoute(builder: (_) => const AiChatScreen(), settings: settings);
+            case '/ai-image':
+              return MaterialPageRoute(builder: (_) => const AiImageScreen(), settings: settings);
             case '/recommend-users':
               return MaterialPageRoute(builder: (_) => const RecommendUsersScreen(), settings: settings);
             case '/trending':

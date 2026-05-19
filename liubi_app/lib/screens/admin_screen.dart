@@ -692,6 +692,11 @@ class _AIConfigTabState extends State<_AIConfigTab> {
   bool _enabled = true;
   bool _loading = true;
 
+  final _imgUrlCtrl = TextEditingController();
+  final _imgKeyCtrl = TextEditingController();
+  final _imgModelCtrl = TextEditingController();
+  bool _imgEnabled = true;
+
   @override
   void initState() { super.initState(); _load(); }
 
@@ -707,13 +712,31 @@ class _AIConfigTabState extends State<_AIConfigTab> {
         _enabled = d['enabled'] != 0;
       }
     } catch (_) {}
+    try {
+      final res = await ApiService().get('/admin/ai-image-config');
+      if (res['code'] == 200) {
+        final d = res['data'] as Map<String, dynamic>;
+        _imgUrlCtrl.text = d['api_url'] ?? '';
+        _imgKeyCtrl.text = d['api_key'] ?? '';
+        _imgModelCtrl.text = d['model_name'] ?? '';
+        _imgEnabled = d['enabled'] != 0;
+      }
+    } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _save() async {
     try {
       final res = await ApiService().put('/admin/ai-config', data: {'api_url': _urlCtrl.text, 'api_key': _keyCtrl.text, 'model_name': _modelCtrl.text, 'system_prompt': _promptCtrl.text, 'enabled': _enabled ? 1 : 0});
-      if (res['code'] == 200) AppToast.success(context, message: '保存成功');
+      if (res['code'] == 200) AppToast.success(context, message: 'AI对话配置保存成功');
+      else AppToast.error(context, message: res['msg'] ?? '保存失败');
+    } catch (_) { AppToast.error(context, message: '保存失败'); }
+  }
+
+  Future<void> _saveImage() async {
+    try {
+      final res = await ApiService().put('/admin/ai-image-config', data: {'api_url': _imgUrlCtrl.text, 'api_key': _imgKeyCtrl.text, 'model_name': _imgModelCtrl.text, 'enabled': _imgEnabled ? 1 : 0});
+      if (res['code'] == 200) AppToast.success(context, message: 'AI绘画配置保存成功');
       else AppToast.error(context, message: res['msg'] ?? '保存失败');
     } catch (_) { AppToast.error(context, message: '保存失败'); }
   }
@@ -722,15 +745,31 @@ class _AIConfigTabState extends State<_AIConfigTab> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CupertinoActivityIndicator(radius: 14));
     return SingleChildScrollView(padding: const EdgeInsets.all(12), child: Column(children: [
-      _configCard('API配置', [
-        _adminField(_urlCtrl, 'API URL'),
+      _configCard('AI对话配置', [
+        _adminField(_urlCtrl, 'API URL (如 https://api.deepseek.com/v1/chat/completions)'),
         _adminField(_keyCtrl, 'API Key', obscure: true),
-        _adminField(_modelCtrl, '模型名称'),
+        _adminField(_modelCtrl, '模型名称 (如 deepseek-chat)'),
+        _adminField(_promptCtrl, '系统提示词', maxLines: 4),
+        Container(margin: const EdgeInsets.only(bottom: 8), child: Row(children: [const Expanded(child: Text('启用AI对话', style: TextStyle(fontSize: 14, color: Color(0xFF333333)))), Switch(value: _enabled, onChanged: (v) => setState(() => _enabled = v))])),
+        const SizedBox(height: 4),
+        GestureDetector(onTap: _save, child: Container(width: double.infinity, height: 40, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF5A6E)]), borderRadius: BorderRadius.circular(20)), alignment: Alignment.center, child: const Text('保存对话配置', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)))),
       ]),
-      _configCard('系统提示词', [_adminField(_promptCtrl, '', maxLines: 6)]),
-      Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)), child: Row(children: [const Expanded(child: Text('启用AI助手', style: TextStyle(fontSize: 14, color: Color(0xFF333333)))), Switch(value: _enabled, onChanged: (v) => setState(() => _enabled = v))])),
       const SizedBox(height: 12),
-      GestureDetector(onTap: _save, child: Container(width: double.infinity, height: 44, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF5A6E)]), borderRadius: BorderRadius.circular(22)), alignment: Alignment.center, child: const Text('保存配置', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.w600)))),
+      _configCard('AI绘画配置', [
+        Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: const Color(0xFFFFF5F5), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFFFE0E0), width: 0.5)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [Icon(Icons.brush_outlined, size: 16, color: Color(0xFFFF2442)), SizedBox(width: 6), Text('GPT Image 2', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFFF2442)))],),
+          SizedBox(height: 4),
+          Text('最先进的图像生成模型，支持快速、高质量的图像生成和编辑', style: TextStyle(fontSize: 11, color: Color(0xFF999999), height: 1.4)),
+          SizedBox(height: 2),
+          Text('端点: /v1/images/generations', style: TextStyle(fontSize: 11, color: Color(0xFFBBBBBB))),
+        ])),
+        _adminField(_imgUrlCtrl, 'API URL (如 https://api.openai.com/v1/images/generations)'),
+        _adminField(_imgKeyCtrl, 'API Key', obscure: true),
+        _adminField(_imgModelCtrl, '模型名称 (如 gpt-image-2)'),
+        Container(margin: const EdgeInsets.only(bottom: 8), child: Row(children: [const Expanded(child: Text('启用AI绘画', style: TextStyle(fontSize: 14, color: Color(0xFF333333)))), Switch(value: _imgEnabled, onChanged: (v) => setState(() => _imgEnabled = v))])),
+        const SizedBox(height: 4),
+        GestureDetector(onTap: _saveImage, child: Container(width: double.infinity, height: 40, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF5A6E)]), borderRadius: BorderRadius.circular(20)), alignment: Alignment.center, child: const Text('保存绘画配置', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)))),
+      ]),
     ]));
   }
 }

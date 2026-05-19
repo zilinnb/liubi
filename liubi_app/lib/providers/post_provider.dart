@@ -305,6 +305,7 @@ class PostProvider with ChangeNotifier {
     String imageUrl = '',
     String voiceUrl = '',
     int voiceDuration = 0,
+    int? replyToUserId,
   }) async {
     return await ApiService().post('/comments', data: {
       'post_id': postId,
@@ -313,6 +314,7 @@ class PostProvider with ChangeNotifier {
       'image_url': imageUrl,
       'voice_url': voiceUrl,
       'voice_duration': voiceDuration,
+      'reply_to_user_id': replyToUserId,
     });
   }
 

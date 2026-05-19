@@ -17,7 +17,7 @@ function sendToUser(userId, data) {
 	}
 }
 
-async function pushNotification(db, toUserId, notifType, fromUserId, targetId) {
+async function pushNotification(db, toUserId, notifType, fromUserId, targetId, commentId) {
 	try {
 		const [fromUser] = await db.query('SELECT nickname, avatar FROM users WHERE id = ?', [fromUserId])
 		const sender = fromUser[0] || {}
@@ -28,16 +28,19 @@ async function pushNotification(db, toUserId, notifType, fromUserId, targetId) {
 			if (post.length) targetTitle = post[0].title || ''
 		}
 
+		const notifData = {
+			notif_type: notifType,
+			from_user_id: fromUserId,
+			from_user_name: sender.nickname || '',
+			from_user_avatar: sender.avatar || '',
+			target_id: targetId || null,
+			target_title: targetTitle,
+		}
+		if (commentId) notifData.comment_id = commentId
+
 		sendToUser(toUserId, {
 			type: 'notification',
-			data: {
-				notif_type: notifType,
-				from_user_id: fromUserId,
-				from_user_name: sender.nickname || '',
-				from_user_avatar: sender.avatar || '',
-				target_id: targetId || null,
-				target_title: targetTitle,
-			}
+			data: notifData
 		})
 	} catch (e) {
 		console.error('[WS] pushNotification error:', e.message)
