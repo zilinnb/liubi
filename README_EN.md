@@ -7,14 +7,14 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.5-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.0.8-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">Liubi 留笔</h1>
 
 <p align="center"><strong>Mark Your Life</strong></p>
 
-<p align="center">A Xiaohongshu-style social community app featuring rich media posts, real-time chat, AI assistant, and category-based communities.<br>Built with Flutter + Node.js + MySQL, powered by WebSocket for real-time communication.</p>
+<p align="center">A Xiaohongshu-style social community app featuring rich media posts, real-time chat, AI assistant, category-based communities, and more.<br>Built with Flutter + Node.js + MySQL architecture, powered by WebSocket for real-time communication.</p>
 
 ---
 
@@ -29,6 +29,7 @@
 - [Getting Started](#getting-started)
 - [API Overview](#api-overview)
 - [Deployment](#deployment)
+- [Version History](#version-history)
 
 ---
 
@@ -43,17 +44,33 @@
 - **Link Detection**: Auto-detect URLs in text, red underline clickable, opens in built-in browser
 - **Private Posts**: Set posts as private, visible only to the author
 
-### 💬 Social Interaction
+### � Coin System (留币)
+- **Daily Check-in**: Earn coins daily with increasing rewards for consecutive days
+- **Red Packets**: Attach red packets to posts, other users can grab coins
+- **Appreciation**: Tip posts with coins, support custom amounts
+- **Transaction Records**: Complete income/expense details, balance/total earned/total spent stats
+- **Coin Configuration**: Admins can configure check-in base reward, max reward, exp reward, etc.
+
+### 🏆 Level System
+- **12 Levels**: From "Newcomer" to "Return to Simplicity", Huluxia-style level system
+- **EXP Acquisition**: Earn EXP via check-in/posting/commenting/being liked/being collected
+- **Level Badges**: Displayed across all scenes (post cards/comments/chat/profile/discover page)
+- **Level Colors**: Lv.1-3 gray / Lv.4-6 blue / Lv.7-9 purple / Lv.10-12 gold
+- **EXP Progress Bar**: Profile page shows upgrade progress with current/next level EXP
+- **Category Level Restriction**: Categories can set minimum posting level requirements
+
+### �💬 Social Interaction
 - **Like / Collect**: Bounce animation effects, real-time count updates
 - **Comment System**: Nested replies (threaded), comment like animations, image comments
 - **@Mentions**: Auto-complete `@username` in comments, sends notification
-- **Follow System**: Bidirectional follow/follower relationship with privacy controls
+- **Follow System**: Bidirectional follow/follower relationship, mutual follow/follow back/following states, privacy controls
 - **Category Communities**: Tieba-style categories with follow/post/pin/trending
+- **Password Recovery**: Reset password via email verification code, 5-minute validity
 
 ### 📡 Real-Time Communication
 - **Private Chat**: WebSocket real-time messaging, text/image messages
 - **Group Chat**: Join via group code, member management
-- **Message Recall**: Recall within 2 minutes
+- **Voice Recording**: WeChat-style waveform animation, swipe up to cancel
 - **Conversation Management**: Pin / Mark as read / Delete with instant UI updates
 - **System Notifications**: Push notifications when app is in background, tap to navigate
 - **Heartbeat Keep-Alive**: 30s heartbeat, auto-reconnect (incremental delay, max 10 attempts)
@@ -63,17 +80,28 @@
 - **Markdown Rendering**: Mac-style code blocks (Catppuccin Mocha dark theme), copy button
 - **Chat History**: Local persistence
 
-### 🔧 Admin Dashboard
-- **8 Modules**: Statistics / Users / Posts / Comments / Categories / Conversations / Email Config / AI Config
-- **User Management**: Disable / Mute / Role switching
-- **Content Moderation**: Post takedown / Comment deletion / Category management
-- **Version Management**: Publish new versions, force update control
+### 🔧 Admin Dashboard (Standalone SPA)
+- **Tech Stack**: Vue 3 + Vite + Element Plus + ECharts + Pinia
+- **Standalone Deployment**: Accessible at `/admin` path, Vite dev proxy to backend port 3000
+- **10 Modules**:
+  - **Dashboard**: Total users/posts/comments/today stats cards (number scroll animation), registration trend line chart (ECharts, 30s auto-refresh), system info panel (Node version/DB status/online count/uptime)
+  - **User Management**: Search/role filter/status filter, edit profile, disable/enable, mute (quick times: 1h/6h/1d/7d/30d), coin/level display
+  - **Post Management**: Tab filter (All/Normal/Pending/Off-shelf), approve/off-shelf/recover/delete, post detail drawer
+  - **Comment Management**: Comment list, post title association, delete
+  - **Category Management**: CRUD, icon/cover/color/sort/status/posting level restriction
+  - **Conversation Management**: Private/group chat filter, edit group code, delete conversation
+  - **Coin Management**: User coin/level/EXP search, adjust coins (positive add/negative subtract + description), adjust EXP, level config table, check-in config (online modify reward params)
+  - **AI Config**: AI chat config (API URL/Key/model/prompt/enable switch), AI image config (API URL/Key/model/enable switch)
+  - **Version Management**: Publish/edit/delete versions, platform select (Android/iOS/All), update type (Feature/Bug/Security), force update switch
+  - **System Settings**: Email SMTP config (database stored, online modify), test email sending
+- **Security**: JWT auth, route guard, 401 auto-redirect to login
+- **UI**: Collapsible sidebar, theme color `#FF2442`, rounded cards, responsive layout
 
 ---
 
 ## Screens
 
-### Main Screens (26)
+### Main Screens (27+)
 
 | Screen | File | Description |
 |--------|------|-------------|
@@ -81,23 +109,24 @@
 | Home | `home_screen.dart` | Category tabs + waterfall post grid, pull-to-refresh / load-more / back-to-top |
 | Discover | `discover_screen.dart` | Trending posts, recommended users, online count, categories, stats |
 | Messages | `message_screen.dart` | Chat conversation list, long-press floating menu (pin/read/delete), unread badges |
-| Me | `mine_screen.dart` | Profile info, posts/collects/liked tabs, settings entry |
-| Publish | `publish_screen.dart` | Block editor, text/image/voice/link blocks, recording, hashtags |
-| Detail | `detail_screen.dart` | Post content, image preview (save), voice playback, comments (threaded), like/collect/share |
-| Chat | `chat_screen.dart` | Private/group chat, message recall, local cache (200 msgs/conversation) |
+| Me | `mine_screen.dart` | Xiaohongshu-style profile, collapsible header, posts/collects/liked/activity tabs, level badge/EXP bar/coin entry |
+| Publish | `publish_screen.dart` | Block editor, text/image/voice/link blocks, recording, hashtags, red packets, category level restriction |
+| Detail | `detail_screen.dart` | Post content, image preview (save/share), voice playback, comments (threaded/level badges), appreciation list, like/collect/share, mutual follow status |
+| Chat | `chat_screen.dart` | Private/group chat, message recall, WeChat-style voice recording animation, local cache (200 msgs/conversation) |
 | Login | `login_screen.dart` | Password login, verification code login, email registration, native loading indicator |
 | Search | `search_screen.dart` | Search posts/users, trending keywords, search history |
 | AI Chat | `ai_chat_screen.dart` | DeepSeek conversation, streaming output, Mac-style code blocks |
 | Category | `category_screen.dart` | Tieba-style, category info/follow/latest/trending/liked/pinned posts |
-| User Profile | `user_profile_screen.dart` | User info, follow status, DM entry, post list |
+| User Profile | `user_profile_screen.dart` | Xiaohongshu-style user page, collapsible header, mutual follow/follow back status, privacy, activity tab, level badge/EXP bar |
 | Edit Profile | `edit_profile_screen.dart` | Avatar/background/nickname/bio/gender/birthday(Chinese)/region |
 | Notifications | `notification_list_screen.dart` | Like/comment/follow/system tabs |
-| Settings | `settings_screen.dart` | Cache clear, version update, about, logout |
-| Privacy | `privacy_settings_screen.dart` | Follow/fans/liked list privacy, change username/email(verification)/password |
+| Settings | `settings_screen.dart` | Cache clear, version update, about, logout, email verification password recovery |
+| Privacy | `privacy_settings_screen.dart` | Follow/fans/liked list privacy, change username/email(verification)/password, send code loading state |
 | Notification Settings | `notification_settings_screen.dart` | Push/like/comment/follow/collect/chat notification toggles |
 | In-App Browser | `in_app_browser_screen.dart` | WebView, top bar navigation, more menu (copy link/open in browser/refresh) |
-| Image Viewer | `image_viewer_screen.dart` | Full-screen view, swipe, long-press save (Xiaohongshu-style bottom sheet) |
-| Admin | `admin_screen.dart` | 8-tab admin panel, admin-only |
+| Image Viewer | `image_viewer_screen.dart` | Full-screen view, swipe, save/share (Xiaohongshu-style bottom sheet) |
+| Coin Center | `coin_center_screen.dart` | Coin balance, daily check-in, transaction records, red packet/appreciation entry |
+| Admin Dashboard | `liubi-admin/` | Standalone SPA admin panel (Vue3+Vite+ElementPlus), `/admin` path, 10 modules |
 | Trending | `trending_screen.dart` | Trending / Latest tabs |
 | About | `about_screen.dart` | App version info, user agreement/privacy policy (in-app browser) |
 | Follow/Fans | `follow_list_screen.dart` | Following / Followers list |
@@ -113,11 +142,11 @@
 │                   Flutter Frontend                    │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ │
 │  │ Screens  │ │Providers │ │ Services │ │ Widgets │ │
-│  │   (26)   │ │   (2)    │ │   (5)    │ │  (11)   │ │
+│  │   (27)   │ │   (2)    │ │   (5)    │ │  (11)   │ │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └─────────┘ │
 │       │            │            │                     │
 │  ┌────┴────────────┴────────────┴─────┐              │
-│  │            Models (6)               │              │
+│  │            Models (7)               │              │
 │  └────────────────────────────────────┘              │
 └──────────────────────┬──────────────────────────────┘
                        │ HTTP (Dio) / WebSocket
@@ -126,15 +155,30 @@
 │  ┌──────────────────────────────────────────────┐    │
 │  │  Express + WebSocket (ws)                    │    │
 │  │  ┌────────┐ ┌────────┐ ┌────────┐           │    │
-│  │  │ Routes │ │  Auth  │ │ Utils  │           │    │
-│  │  │  (13)  │ │ (JWT)  │ │(mail)  │           │    │
+│  │  │ Routes │ │  Auth   │ │ Utils  │           │    │
+│  │  │  (15)  │ │ (JWT)   │ │(mail)  │           │    │
 │  │  └───┬────┘ └────────┘ └────────┘           │    │
 │  └──────┼───────────────────────────────────────┘    │
 │         │                                            │
 │  ┌──────┴───────────────────────────────────────┐    │
-│  │         MySQL Database (20 tables)            │    │
+│  │         MySQL Database (24 tables)            │    │
+│  └──────────────────────────────────────────────┘    │
+│         │                                            │
+│  ┌──────┴───────────────────────────────────────┐    │
+│  │      /admin → Admin SPA (static assets)       │    │
 │  └──────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│             Admin Dashboard (Vue3 SPA)                │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ │
+│  │  Views   │ │  Router  │ │   API    │ │ Layout  │ │
+│  │   (11)   │ │(JWT Guard)│ │(30+ APIs)│ │(Sidebar)│ │
+│  └──────────┘ └──────────┘ └──────────┘ └─────────┘ │
+│  Vue3 + Vite + Element Plus + ECharts + Pinia       │
+└──────────────────────┬──────────────────────────────┘
+                       │ HTTP (Axios + JWT)
+                       │ → /api/admin/*
 ```
 
 ### Frontend Stack
@@ -172,6 +216,18 @@
 | **cors** | Cross-origin support |
 | **dotenv** | Environment variables |
 
+### Admin Dashboard Stack
+
+| Tech | Purpose |
+|------|---------|
+| **Vue 3** | Frontend framework, Composition API |
+| **Vite 6** | Build tool, HMR hot reload |
+| **Element Plus** | UI component library (table/form/dialog/tag/pagination etc.) |
+| **ECharts 5** | Chart library (registration trend line chart) |
+| **Pinia** | State management |
+| **Axios** | HTTP client, auto JWT injection |
+| **Vue Router 4** | Route management, JWT navigation guard |
+
 ---
 
 ## Project Structure
@@ -181,40 +237,81 @@ liubi/
 ├── liubi_app/                        # Flutter Frontend
 │   ├── lib/
 │   │   ├── main.dart                 # Entry: routing, theme, Provider setup
-│   │   ├── screens/                  # UI Layer (26 screens)
-│   │   ├── providers/                # State Management (2)
-│   │   ├── models/                   # Data Models (6)
+│   │   ├── screens/                  # UI Layer (27 screens)
+│   │   │   ├── main_screen.dart      # Main frame (4 tabs)
+│   │   │   ├── home_screen.dart      # Home (waterfall grid)
+│   │   │   ├── discover_screen.dart  # Discover
+│   │   │   ├── message_screen.dart   # Messages
+│   │   │   ├── mine_screen.dart      # Me
+│   │   │   ├── publish_screen.dart   # Publish (block editor)
+│   │   │   ├── detail_screen.dart    # Post detail
+│   │   │   ├── chat_screen.dart      # Chat
+│   │   │   ├── login_screen.dart     # Login/Register
+│   │   │   ├── ai_chat_screen.dart   # AI Assistant
+│   │   │   ├── coin_center_screen.dart # Coin Center
+│   │   │   └── ...                   # Other screens
+│   │   ├── providers/                # State Management
+│   │   │   ├── post_provider.dart    # Post state
+│   │   │   └── user_provider.dart    # User state
+│   │   ├── models/                   # Data Models (7, incl. LevelInfo)
 │   │   ├── services/                 # Service Layer (5)
 │   │   │   ├── api_service.dart      # HTTP Client (Dio)
 │   │   │   ├── chat_service.dart     # WebSocket Service
 │   │   │   ├── storage_service.dart  # Local Storage
 │   │   │   ├── notification_service.dart # System Notifications
 │   │   │   └── update_service.dart   # Version Update
-│   │   ├── widgets/                  # Shared Components (11)
+│   │   ├── widgets/                  # Shared Components (incl. level_badge etc.)
 │   │   └── utils/                    # Utilities
 │   ├── android/                      # Android native config
 │   └── pubspec.yaml                  # Dependencies
 │
 ├── server/                           # Node.js Backend
 │   ├── server.js                     # Entry: Express+WebSocket+Auto DB Init
-│   ├── routes/                       # API Routes (13)
-│   │   ├── auth.js                   # Auth (register/login/verification)
-│   │   ├── posts.js                  # Posts (CRUD/like/collect/search)
-│   │   ├── comments.js               # Comments (threaded/like)
-│   │   ├── users.js                  # Users (profile/follow/privacy)
-│   │   ├── categories.js             # Categories (community/follow)
-│   │   ├── chat.js                   # Chat (private/group/recall)
+│   ├── routes/                       # API Routes (15)
+│   │   ├── auth.js                   # Auth (register/login/verification/coins/levels)
+│   │   ├── posts.js                  # Posts (CRUD/like/collect/level info/EXP reward)
+│   │   ├── comments.js               # Comments (threaded/like/level info/EXP reward)
+│   │   ├── users.js                  # Users (profile/follow/privacy/coins/levels/password reset)
+│   │   ├── categories.js             # Categories (community/follow/level restriction)
+│   │   ├── chat.js                   # Chat (private/group/recall/level info)
 │   │   ├── messages.js               # Message notifications
 │   │   ├── notifications.js          # Notifications (unread stats)
 │   │   ├── upload.js                 # File upload
 │   │   ├── ai.js                     # AI chat (DeepSeek)
 │   │   ├── version.js                # Version management
-│   │   ├── admin.js                  # Admin dashboard
-│   │   └── stats.js                  # Statistics (online/overview)
+│   │   ├── admin.js                  # Admin dashboard (email config DB/test send)
+│   │   ├── stats.js                  # Statistics (online/overview/DB status/uptime)
+│   │   ├── coins.js                  # Coins (checkin/redpacket/appreciate/transactions/config)
+│   │   └── level-config.js           # Level config (12-level EXP table/EXP rules)
 │   ├── config/                       # Database / environment config
 │   ├── middleware/                    # JWT auth middleware
 │   ├── utils/                        # Utilities (mail/IP/WS)
 │   └── package.json                  # Dependencies
+│
+├── liubi-admin/                      # Admin Dashboard (Vue3 SPA)
+│   ├── src/
+│   │   ├── views/                    # Pages (11)
+│   │   │   ├── Login.vue             # Login (admin email + password)
+│   │   │   ├── Dashboard.vue         # Dashboard (stats cards + registration trend + system info)
+│   │   │   ├── Users.vue             # User management (search/filter/edit/disable/mute)
+│   │   │   ├── Posts.vue             # Post management (tab filter/approve/off-shelf/detail drawer)
+│   │   │   ├── Comments.vue          # Comment management (list/delete)
+│   │   │   ├── Categories.vue        # Category management (CRUD/color/level restriction)
+│   │   │   ├── Conversations.vue     # Conversation management (private/group/group code edit)
+│   │   │   ├── Coins.vue             # Coin management (adjust coins/EXP/level config/check-in config)
+│   │   │   ├── AiConfig.vue          # AI config (chat + image dual config)
+│   │   │   ├── Version.vue           # Version management (publish/edit/delete/force update)
+│   │   │   └── System.vue            # System settings (SMTP config + test send)
+│   │   ├── api/admin.js              # API interface (30+ endpoints)
+│   │   ├── layout/index.vue          # Layout (collapsible sidebar + top bar)
+│   │   ├── router/index.js           # Router (JWT guard)
+│   │   ├── utils/request.js          # Axios wrapper (JWT injection / 401 intercept)
+│   │   ├── App.vue                   # Root component
+│   │   ├── main.js                   # Entry (ElementPlus registration)
+│   │   └── style.css                 # Global styles
+│   ├── dist/                         # Build output (deploy to /admin/ path)
+│   ├── vite.config.js                # Vite config (base:/admin/, proxy /api)
+│   └── package.json                  # Dependencies (Vue3/Vite/ElementPlus/ECharts/Pinia)
 │
 └── liubi-release.jks                 # Android signing keystore (excluded)
 ```
@@ -223,7 +320,7 @@ liubi/
 
 ## Database Design
 
-**20 tables** in 6 domains:
+**24 tables** in 8 domains:
 
 ### User Domain
 | Table | Description |
@@ -231,6 +328,7 @@ liubi/
 | `users` | User profiles (nickname/avatar/bio/gender/birthday/region/role/privacy) |
 | `follows` | Follow relationships (follower_id + following_id unique) |
 | `verify_codes` | Verification codes (email/code/type/expires in 5min) |
+| `reset_codes` | Password reset codes (email/code/expires in 5min) |
 
 ### Content Domain
 | Table | Description |
@@ -238,7 +336,7 @@ liubi/
 | `posts` | Posts (title/content/category/type/voice/link/content_blocks JSON/private) |
 | `post_images` | Post images (URL/media type/aspect ratio/sort order) |
 | `comments` | Comments (nested parent_id/image/likes/pinned) |
-| `categories` | Categories (name/icon/description/heat/follow count/post restriction) |
+| `categories` | Categories (name/icon/description/heat/follow count/post restriction/min level) |
 | `category_follows` | Category follows |
 
 ### Interaction Domain
@@ -256,6 +354,26 @@ liubi/
 | `chat_conversations` | Conversations (private/group/group code) |
 | `chat_members` | Members (pinned/hidden flags) |
 | `chat_messages` | Messages (text/image/system/recalled) |
+
+### Coin Domain
+| Table | Description |
+|-------|-------------|
+| `user_coins` | User coins (balance/total earned/total spent/checkin days/last checkin) |
+| `coin_transactions` | Coin transaction records (type/amount/related ID/note) |
+| `coin_config` | Coin configuration (checkin base reward/max reward/EXP reward etc.) |
+| `redpackets` | Red packets (total amount/count/remaining/message/related post) |
+| `redpacket_records` | Red packet claim records (user/amount/time) |
+| `appreciations` | Appreciations (post/amount/appreciator) |
+
+### Level Domain
+| Table | Description |
+|-------|-------------|
+| `user_levels` | User levels (EXP/level auto-calculated) |
+
+### Config Domain
+| Table | Description |
+|-------|-------------|
+| `email_config` | Email config (SMTP host/port/account/password/sender, DB storage replacing .env) |
 
 ### Others
 | Table | Description |
@@ -290,6 +408,7 @@ liubi/
 | Loading Indicator | `CupertinoActivityIndicator`, native system style |
 | Text Selection | `SelectableText` + custom copy callback (toast "Copied") |
 | System Notifications | Dual channels (community + chat), tap to navigate |
+| Voice Recording | WeChat-style waveform animation, swipe up to cancel |
 
 ### Adaptations
 - **OPPO Font**: `fontFamily: null` + `Typography.blackCupertino` + `letterSpacing: 0`
@@ -312,7 +431,7 @@ liubi/
 ```bash
 cd server
 npm install
-cp .env.example ..env    # Configure database and email
+cp .env.example .env    # Configure database and email
 node server.js           # Auto-creates tables + starts server
 ```
 
@@ -337,6 +456,19 @@ flutter run
 ```
 
 API base URL is configured in `lib/services/api_service.dart`.
+
+### Admin Dashboard Setup
+
+```bash
+cd liubi-admin
+npm install
+npm run dev     # Dev mode, port 3001, auto proxy /api to port 3000
+npm run build   # Build to dist/, deploy to server's /admin/ path
+```
+
+Admin dashboard URL: `http://localhost:3001/admin/` (dev mode) or `http://your-server/admin/` (production)
+
+> Admin accounts require `users.role = 1` (admin) or `2` (super admin) in the database
 
 ### Build Signed APK
 
@@ -363,8 +495,9 @@ Output: `build/app/outputs/flutter-apk/app-release.apk`
 | Upload | `/api/upload` | 2 | Single/multi file |
 | AI | `/api/ai` | 3 | Chat/history/clear |
 | Version | `/api/version` | 5 | Check update/CRUD |
-| Admin | `/api/admin` | 20+ | Stats/users/posts/categories/config |
-| Stats | `/api/stats` | 2 | Online count/overview |
+| Admin | `/api/admin` | 25+ | Stats/users/posts/categories/email-config/ai-config/version |
+| Coins | `/api/coins` | 10+ | Checkin/balance/redpacket/appreciate/transactions/config/level-config |
+| Stats | `/api/stats` | 2 | Online count/overview/DB status/Node version/uptime |
 | WebSocket | `/ws` | - | Real-time chat/notifications/heartbeat/online broadcast |
 
 ---
@@ -384,6 +517,18 @@ pm2 start server.js --name liubi
 pm2 save
 ```
 
+### Admin Dashboard Deployment
+
+```bash
+# Build admin dashboard
+cd liubi-admin
+npm install
+npm run build
+
+# Deploy dist/ to server's /admin/ path
+scp -r dist/ root@your_server:/www/wwwroot/liubi/server/public/admin/
+```
+
 ### Heat Algorithm
 
 ```
@@ -397,7 +542,8 @@ Category Heat = views×0.1 + likes×3 + comments×2 + collects×1.5
 
 | Version | Build | Notes |
 |---------|-------|-------|
-| Beta 0.0.5 | 104 | Current release |
+| Beta 0.0.8 | 107 | Coin system (checkin/redpacket/appreciate/transactions), Level system (12 levels/EXP/badges/category restrictions), Admin dashboard standalone SPA, Email config DB migration, Password recovery, WeChat-style voice recording animation, Image sharing, AI generation page redesign, Text-only card optimization, Level badges across all scenes |
+| Beta 0.0.6 | 105 | Emoji messages, Live Photo support, Category page optimization, Voice message display optimization, AI chat keyboard overlap fix |
 
 ---
 
