@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/post.dart';
 import '../utils/helpers.dart';
+import 'level_badge.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -254,36 +255,42 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
   }
 
   Widget _buildFallbackCover(Post p) {
-    final text = p.content ?? p.title ?? '';
-    final firstChar = text.isNotEmpty ? text[0] : '';
-    return Stack(
-      children: [
-        Container(
-          width: double.infinity,
-          height: 120,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-          decoration: const BoxDecoration(color: Color(0xFFFFF0F0)),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (firstChar.isNotEmpty)
-                Text(firstChar, style: const TextStyle(fontSize: 48, color: Color(0x30FF2442), fontWeight: FontWeight.w900)),
-              const SizedBox(height: 4),
-              Text(
-                text,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, color: Color(0xFFFF2442), height: 1.8),
-              ),
-            ],
-          ),
+    final title = p.title ?? '';
+    final content = p.content ?? '';
+    // 纯文字卡片：类似语音卡片，标题加粗靠左，下面内容
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 100, maxHeight: 200),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFF8F8), Color(0xFFFFF0F0)],
         ),
-        Positioned(
-          left: 6,
-          bottom: 6,
-          child: _buildViewBadge(p),
-        ),
-      ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (title.isNotEmpty)
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14, color: Color(0xFF333333), fontWeight: FontWeight.w700, height: 1.4),
+            ),
+          if (content.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              content,
+              maxLines: 5,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF888888), height: 1.5),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -351,7 +358,15 @@ class _PostCardState extends State<PostCard> with TickerProviderStateMixin {
                   children: [
                     _buildAvatar(p),
                     const SizedBox(width: 6),
-                    Expanded(child: Text(p.nickname ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Color(0xFF666666), fontWeight: FontWeight.w500))),
+                    Expanded(child: Row(
+                      children: [
+                        Flexible(child: Text(p.nickname ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Color(0xFF666666), fontWeight: FontWeight.w500))),
+                        if (p.levelInfo != null) ...[
+                          const SizedBox(width: 4),
+                          LevelBadge(levelInfo: p.levelInfo, fontSize: 9),
+                        ],
+                      ],
+                    )),
                   ],
                 ),
               ),

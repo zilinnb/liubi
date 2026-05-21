@@ -1,3 +1,5 @@
+import 'user.dart';
+
 class ContentBlock {
   final String type;
   final String content;
@@ -119,6 +121,8 @@ class Post {
   final String username;
   final String avatar;
   final String createdAt;
+  final int? redpacketId;
+  final LevelInfo? levelInfo;
 
   Post({
     required this.id,
@@ -151,6 +155,8 @@ class Post {
     this.username = '',
     this.avatar = '',
     this.createdAt = '',
+    this.redpacketId,
+    this.levelInfo,
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -205,6 +211,10 @@ class Post {
       username: json['username'] ?? '',
       avatar: json['avatar'] ?? '',
       createdAt: json['created_at'] ?? '',
+      redpacketId: json['redpacket_id'],
+      levelInfo: json['level_info'] != null
+          ? LevelInfo.fromJson(json['level_info'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -240,6 +250,8 @@ class Post {
       'username': username,
       'avatar': avatar,
       'created_at': createdAt,
+      'redpacket_id': redpacketId,
+      'level_info': levelInfo?.toJson(),
     };
   }
 
@@ -274,6 +286,8 @@ class Post {
     String? username,
     String? avatar,
     String? createdAt,
+    int? Function()? redpacketId,
+    LevelInfo? levelInfo,
   }) {
     return Post(
       id: id ?? this.id,
@@ -306,6 +320,8 @@ class Post {
       username: username ?? this.username,
       avatar: avatar ?? this.avatar,
       createdAt: createdAt ?? this.createdAt,
+      redpacketId: redpacketId != null ? redpacketId() : this.redpacketId,
+      levelInfo: levelInfo ?? this.levelInfo,
     );
   }
 }

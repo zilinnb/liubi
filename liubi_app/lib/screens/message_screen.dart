@@ -7,6 +7,8 @@ import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../utils/helpers.dart';
+import '../widgets/level_badge.dart';
+import '../models/user.dart';
 import '../utils/emoji_text.dart';
 import '../models/conversation.dart';
 import 'main_screen.dart';
@@ -405,6 +407,10 @@ class _MessageScreenState extends State<MessageScreen> {
                     children: [
                       Expanded(child: Row(children: [
                         Flexible(child: Text(conv.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Color(0xFF333333)), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                        if (!isGroup && conv.levelInfo != null) ...[
+                          const SizedBox(width: 4),
+                          LevelBadge(levelInfo: conv.levelInfo, fontSize: 9),
+                        ],
                         if (isGroup) ...[
                           const SizedBox(width: 4),
                           Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFF1890FF), borderRadius: BorderRadius.circular(2)), child: Text('群聊', style: const TextStyle(fontSize: 9, color: Colors.white))),

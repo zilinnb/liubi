@@ -8,6 +8,8 @@ import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../utils/helpers.dart';
+import '../widgets/level_badge.dart';
+import '../models/user.dart';
 
 class DiscoverScreen extends StatefulWidget {
   const DiscoverScreen({super.key});
@@ -312,6 +314,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           ),
           const SizedBox(height: 4),
           Text(nickname, style: const TextStyle(fontSize: 11, color: Color(0xFF333333)), maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (user['level_info'] != null) ...[
+            LevelBadge(levelInfo: LevelInfo.fromJson(Map<String, dynamic>.from(user['level_info'] as Map)), fontSize: 8),
+          ],
           if (isMutual)
             const Text('互关', style: TextStyle(fontSize: 9, color: Color(0xFF1890FF), fontWeight: FontWeight.w600))
           else
@@ -495,6 +500,10 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                           ),
                         ),
                       Text(nickname, style: const TextStyle(fontSize: 11, color: Color(0xFF999999))),
+                      if (post['level_info'] != null) ...[
+                        const SizedBox(width: 4),
+                        LevelBadge(levelInfo: LevelInfo.fromJson(Map<String, dynamic>.from(post['level_info'] as Map)), fontSize: 8),
+                      ],
                       const SizedBox(width: 6),
                       Text('${fmtNum(post['likes_count'] as int? ?? 0)}赞', style: const TextStyle(fontSize: 11, color: Color(0xFF999999))),
                     ],

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>留笔 - 管理后台</title>
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <style>
+    #app-loader{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff;z-index:9999;transition:opacity .3s}
+    #app-loader.fade-out{opacity:0;pointer-events:none}
+    .loader-spinner{width:40px;height:40px;border:3px solid #f0f0f0;border-top-color:#FF2442;border-radius:50%;animation:spin .8s linear infinite}
+    .loader-text{margin-top:16px;font-size:14px;color:#999;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+  <script type="module" crossorigin src="/admin/assets/index-B3FbzVIW.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-Cm1-KJz3.css">
+</head>
+<body>
+  <div id="app">
+    <div id="app-loader">
+      <div class="loader-spinner"></div>
+      <div class="loader-text">加载中...</div>
+    </div>
+  </div>
+</body>
+</html>

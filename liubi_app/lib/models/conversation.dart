@@ -1,3 +1,5 @@
+import 'user.dart';
+
 class Conversation {
   final int id;
   final int type;
@@ -15,6 +17,7 @@ class Conversation {
   final List<int> memberIds;
   final int memberCount;
   final int otherUserId;
+  final LevelInfo? levelInfo;
   bool isPinned;
 
   Conversation({
@@ -34,6 +37,7 @@ class Conversation {
     this.memberIds = const [],
     this.memberCount = 0,
     this.otherUserId = 0,
+    this.levelInfo,
     this.isPinned = false,
   });
 
@@ -73,6 +77,9 @@ class Conversation {
       memberIds: ids,
       memberCount: json['member_count'] ?? 0,
       otherUserId: json['other_user_id'] ?? 0,
+      levelInfo: json['level_info'] != null
+          ? LevelInfo.fromJson(json['level_info'] as Map<String, dynamic>)
+          : null,
       isPinned: json['is_pinned'] == 1 || json['is_pinned'] == true,
     );
   }

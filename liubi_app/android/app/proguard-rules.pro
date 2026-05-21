@@ -1,21 +1,26 @@
 # Flutter
 -keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.**  { *; }
--keep class io.flutter.util.**  { *; }
--keep class io.flutter.view.**  { *; }
--keep class io.flutter.**  { *; }
--keep class io.flutter.plugins.**  { *; }
+-keep class io.flutter.plugin.** { *; }
+-keep class io.flutter.util.** { *; }
+-keep class io.flutter.view.** { *; }
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+-dontwarn io.flutter.embedding.android.FlutterPlayStoreSplitApplication
+-dontwarn com.google.android.play.core.**
 
-# Keep native JSON serialization
--keepclassmembers class * {
-    @com.google.gson.annotations.SerializedName <fields>;
-}
+# WebView
+-keep class * extends android.webkit.WebViewClient { *; }
+-keep class * extends android.webkit.WebChromeClient { *; }
 
-# Keep models used for JSON parsing
--keep class com.liubi.liubi.** { *; }
+# Gson
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.google.gson.** { *; }
 
-# Dio
+# Retrofit & OkHttp
 -dontwarn okhttp3.**
--dontwarn okio.**
--keep class okhttp3.** { *; }
--keep class okio.** { *; }
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+
+# Model classes
+-keep class com.liubi.app.** { *; }

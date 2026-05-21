@@ -460,6 +460,85 @@ async function autoInit() {
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			INDEX idx_user (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS user_coins (
+			user_id INT UNSIGNED PRIMARY KEY,
+			balance INT NOT NULL DEFAULT 0 COMMENT '当前余额',
+			total_earned INT NOT NULL DEFAULT 0 COMMENT '累计获得',
+			total_spent INT NOT NULL DEFAULT 0 COMMENT '累计消费',
+			checkin_days INT NOT NULL DEFAULT 0 COMMENT '连续签到天数',
+			last_checkin DATE DEFAULT NULL COMMENT '最后签到日期',
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS coin_transactions (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			user_id INT UNSIGNED NOT NULL,
+			type TINYINT NOT NULL COMMENT '1签到 2发红包 3抢红包 4赞赏 5收到赞赏 6管理员调整',
+			amount INT NOT NULL COMMENT '正数收入负数支出',
+			related_id INT UNSIGNED DEFAULT NULL COMMENT '关联ID(红包ID/帖子ID等)',
+			description VARCHAR(200) DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_user (user_id),
+			INDEX idx_created (created_at DESC)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS coin_redpackets (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			user_id INT UNSIGNED NOT NULL,
+			post_id INT UNSIGNED DEFAULT NULL COMMENT '关联帖子ID',
+			total_coins INT NOT NULL COMMENT '总留币数',
+			total_count INT NOT NULL COMMENT '总份数',
+			remaining_coins INT NOT NULL DEFAULT 0 COMMENT '剩余留币',
+			remaining_count INT NOT NULL DEFAULT 0 COMMENT '剩余份数',
+			message VARCHAR(50) DEFAULT '恭喜发财' COMMENT '红包祝福语',
+			status TINYINT NOT NULL DEFAULT 1 COMMENT '1进行中 2已抢完 3已过期',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_post (post_id),
+			INDEX idx_user (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS coin_redpacket_grabs (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			redpacket_id INT UNSIGNED NOT NULL,
+			user_id INT UNSIGNED NOT NULL,
+			amount INT NOT NULL COMMENT '领取数量',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY uk_redpacket_user (redpacket_id, user_id),
+			INDEX idx_user (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS coin_appreciations (
+			id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			post_id INT UNSIGNED NOT NULL,
+			from_user_id INT UNSIGNED NOT NULL,
+			amount INT NOT NULL COMMENT '赞赏数量',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_post (post_id),
+			INDEX idx_from (from_user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS user_levels (
+			user_id INT UNSIGNED PRIMARY KEY,
+			level INT NOT NULL DEFAULT 1 COMMENT '当前等级',
+			exp INT NOT NULL DEFAULT 0 COMMENT '当前经验值',
+			total_exp INT NOT NULL DEFAULT 0 COMMENT '累计经验值',
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS coin_config (
+			\`key\` VARCHAR(50) PRIMARY KEY,
+			\`value\` VARCHAR(255) NOT NULL,
+			description VARCHAR(255),
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS reset_codes (
+			email VARCHAR(100) PRIMARY KEY,
+			code VARCHAR(6) NOT NULL,
+			expires_at DATETIME NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE TABLE IF NOT EXISTS email_config (
+			\`key\` VARCHAR(50) PRIMARY KEY,
+			\`value\` VARCHAR(255) NOT NULL,
+			description VARCHAR(255),
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	]
 
 	for (const sql of tables) {
@@ -488,6 +567,19 @@ async function autoInit() {
 		('家居', '🏠', 9, '#faad14', '家居装修生活')`,
 		`INSERT IGNORE INTO users (username, password, nickname, bio, role) VALUES
 		('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员', '系统管理员', 1)`,
+		`INSERT IGNORE INTO coin_config (\`key\`, \`value\`, description) VALUES
+		('checkin_base_reward', '5', '签到基础奖励留币数'),
+		('checkin_min_reward', '5', '签到最小奖励留币数'),
+		('checkin_max_bonus', '30', '签到最大奖励留币数'),
+		('checkin_exp_reward', '5', '签到经验奖励')`,
+		`INSERT IGNORE INTO email_config (\`key\`, \`value\`, description) VALUES
+		('smtp_host', 'smtp.qq.com', 'SMTP服务器地址'),
+		('smtp_port', '465', 'SMTP端口'),
+		('smtp_secure', 'true', '是否使用SSL'),
+		('smtp_user', '', 'SMTP用户名'),
+		('smtp_pass', '', 'SMTP密码/授权码'),
+		('smtp_from', '', '发件人地址'),
+		('smtp_from_name', '留笔', '发件人名称')`,
 	]
 	for (const sql of initData) {
 		try { await db.query(sql) } catch (e) { /* 忽略 */ }
@@ -520,6 +612,8 @@ async function autoInit() {
 		{ table: 'users', column: 'email_notify', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "0关闭 1开启邮件通知"' },
 		{ table: 'messages', column: 'comment_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "关联评论ID"' },
 		{ table: 'ai_chat_history', column: 'conversation_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "对话ID"' },
+		{ table: 'categories', column: 'min_level', definition: 'TINYINT NOT NULL DEFAULT 0 COMMENT "发帖最低等级要求"' },
+		{ table: 'posts', column: 'redpacket_id', definition: 'INT UNSIGNED DEFAULT NULL COMMENT "关联红包ID"' },
 	]
 	for (const m of migrations) {
 		try {
@@ -577,10 +671,34 @@ app.use('/api/upload', require('./routes/upload'))
 app.use('/api/chat', require('./routes/chat'))
 app.use('/api/ai', require('./routes/ai'))
 app.use('/api/version', require('./routes/version'))
+app.use('/api/coins', require('./routes/coins'))
 app.use('/api/notifications', require('./routes/notifications').router)
 const statsModule = require('./routes/stats')
 statsModule.setWsClients(wsClients)
 app.use('/api/stats', statsModule.router)
+
+// 管理后台静态文件
+const adminPath = path.join(__dirname, '..', 'admin')
+// 静态资源（含index.html）
+app.use('/admin', express.static(adminPath, {
+	index: 'index.html',
+	setHeaders: (res, filePath) => {
+		if (filePath.endsWith('index.html')) {
+			res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+			res.setHeader('Pragma', 'no-cache')
+			res.setHeader('Expires', '0')
+		} else if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+			res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+		}
+	}
+}))
+// SPA回退：所有/admin/下的非静态文件子路径都返回index.html
+app.use('/admin', (req, res) => {
+	res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+	res.setHeader('Pragma', 'no-cache')
+	res.setHeader('Expires', '0')
+	res.sendFile(path.join(adminPath, 'index.html'))
+})
 
 app.use((req, res) => {
 	res.status(404).json({ code: 404, msg: '接口不存在' })

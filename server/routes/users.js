@@ -1,7 +1,10 @@
 const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
+const { ensureUserRecords } = require('./coins')
+const { getLevelInfo } = require('./level-config')
 const { pushNotification } = require('../utils/ws-helper')
+const { sendMail } = require('../utils/mailer')
 const router = express.Router()
 
 // 搜索用户
@@ -43,6 +46,17 @@ router.get('/recommend', auth, async (req, res) => {
 		rows.forEach(u => {
 			u.is_followed = myFollowSet.has(u.id)
 			u.is_fan = myFanSet.has(u.id)
+		})
+
+		// 批量查询推荐用户等级
+		const recommendIds = rows.map(u => u.id)
+		let recommendLevelMap = {}
+		if (recommendIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [recommendIds])
+			levelRows.forEach(lr => { recommendLevelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+		rows.forEach(u => {
+			u.level_info = recommendLevelMap[u.id] || null
 		})
 
 		res.json({ code: 200, data: rows })
@@ -131,6 +145,14 @@ router.get('/:id', async (req, res) => {
 		delete user.privacy_fans
 		delete user.privacy_likes
 		delete user.privacy_activities
+
+		// 添加留币和等级数据
+		await ensureUserRecords(req.params.id)
+		const [coinRows] = await db.query('SELECT balance FROM user_coins WHERE user_id = ?', [req.params.id])
+		const [levelRows] = await db.query('SELECT level, exp FROM user_levels WHERE user_id = ?', [req.params.id])
+		const levelInfo = getLevelInfo(levelRows[0]?.exp || 0)
+		user.coins = coinRows[0]?.balance || 0
+		user.level_info = levelInfo
 
 		res.json({ code: 200, data: user })
 	} catch (e) {
@@ -499,6 +521,48 @@ router.get('/:id/activities', async (req, res) => {
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })
+	}
+})
+
+// 发送修改密码验证码
+router.post('/send-reset-code', async (req, res) => {
+	try {
+		const { email } = req.body
+		if (!email) return res.json({ code: 400, msg: '请输入邮箱' })
+		// 检查邮箱是否注册
+		const [users] = await db.query('SELECT id FROM users WHERE email = ?', [email])
+		if (!users.length) return res.json({ code: 400, msg: '该邮箱未注册' })
+		// 生成6位验证码
+		const code = String(Math.floor(100000 + Math.random() * 900000))
+		// 存储验证码（5分钟有效）
+		await db.query('INSERT INTO reset_codes (email, code, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE)) ON DUPLICATE KEY UPDATE code = ?, expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE)', [email, code, code])
+		// 发送邮件
+		await sendMail(db, email, '留笔 - 修改密码验证码', `<div style="padding:20px;background:#f8f8f8;border-radius:8px;"><h2 style="color:#FF2442;">修改密码验证码</h2><p>您的验证码是：<b style="font-size:24px;color:#FF2442;">${code}</b></p><p>验证码5分钟内有效，请勿泄露给他人。</p></div>`)
+		res.json({ code: 200, msg: '验证码已发送' })
+	} catch (e) {
+		console.error('发送验证码失败:', e)
+		res.json({ code: 500, msg: '发送失败，请检查邮箱配置' })
+	}
+})
+
+// 通过验证码修改密码
+router.post('/reset-password', async (req, res) => {
+	try {
+		const { email, code, new_password } = req.body
+		if (!email || !code || !new_password) return res.json({ code: 400, msg: '参数不完整' })
+		if (new_password.length < 6) return res.json({ code: 400, msg: '密码至少6位' })
+		// 验证验证码
+		const [rows] = await db.query('SELECT * FROM reset_codes WHERE email = ? AND code = ? AND expires_at > NOW()', [email, code])
+		if (!rows.length) return res.json({ code: 400, msg: '验证码错误或已过期' })
+		// 更新密码
+		const bcrypt = require('bcryptjs')
+		const hash = await bcrypt.hash(new_password, 10)
+		await db.query('UPDATE users SET password = ? WHERE email = ?', [hash, email])
+		// 删除已使用的验证码
+		await db.query('DELETE FROM reset_codes WHERE email = ?', [email])
+		res.json({ code: 200, msg: '密码修改成功' })
+	} catch (e) {
+		res.json({ code: 500, msg: '修改失败' })
 	}
 })
 

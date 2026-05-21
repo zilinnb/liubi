@@ -1,30 +1,38 @@
 const nodemailer = require('nodemailer')
-const { MAIL_HOST, MAIL_PORT, MAIL_SECURE, MAIL_USER, MAIL_PASS, MAIL_FROM } = require('../config/env')
 
-let transporter = null
+// 从数据库获取邮箱配置并发送邮件
+async function sendMail(db, to, subject, html) {
+	// 从数据库读取配置
+	const [rows] = await db.query("SELECT `key`, `value` FROM email_config")
+	const config = {}
+	rows.forEach(r => { config[r.key] = r.value })
 
-function getTransporter() {
-	if (transporter) return transporter
-	if (!MAIL_HOST || !MAIL_USER || !MAIL_PASS) {
-		console.warn('[Mailer] 邮件未配置: MAIL_HOST, MAIL_USER, MAIL_PASS 缺失')
-		return null
+	if (!config.smtp_host || !config.smtp_user || !config.smtp_pass) {
+		throw new Error('邮箱未配置，请在管理后台设置')
 	}
-	transporter = nodemailer.createTransport({
-		host: MAIL_HOST,
-		port: MAIL_PORT,
-		secure: MAIL_SECURE,
-		auth: { user: MAIL_USER, pass: MAIL_PASS },
-		name: 'liu.bi'
+
+	const transporter = nodemailer.createTransport({
+		host: config.smtp_host,
+		port: parseInt(config.smtp_port) || 465,
+		secure: config.smtp_secure !== 'false',
+		auth: {
+			user: config.smtp_user,
+			pass: config.smtp_pass
+		}
 	})
-	return transporter
+
+	const from = config.smtp_from_name ? `"${config.smtp_from_name}" <${config.smtp_user}>` : config.smtp_user
+
+	await transporter.sendMail({
+		from,
+		to,
+		subject,
+		html
+	})
 }
 
-async function sendVerifyCode(email, code, typeLabel) {
-	const tp = getTransporter()
-	if (!tp) {
-		console.warn('[Mailer] 邮件服务未配置，验证码: ' + code + ' (邮箱: ' + email + ')')
-		return true
-	}
+// 发送验证码邮件
+async function sendVerifyCode(db, email, code, typeLabel) {
 	const html = `
 	<div style="max-width:480px;margin:0 auto;padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 		<div style="text-align:center;margin-bottom:24px;">
@@ -45,31 +53,12 @@ async function sendVerifyCode(email, code, typeLabel) {
 		<p style="color:#ddd;font-size:11px;text-align:center;margin-top:12px;">此邮件由留笔系统自动发送，请勿回复</p>
 	</div>`
 
-	try {
-		const fromName = MAIL_FROM || '留笔'
-		const fromEmail = MAIL_USER
-		const info = await tp.sendMail({
-			from: `"${fromName}" <${fromEmail}>`,
-			to: email,
-			subject: `【留笔】${typeLabel}验证码`,
-			html
-		})
-		console.log('[Mailer] 验证码已发送:', email, info.messageId || '')
-		return true
-	} catch (e) {
-		console.error('[Mailer] 发送失败:', e.message)
-		throw new Error('邮件发送失败，请检查邮箱配置')
-	}
+	await sendMail(db, email, `【留笔】${typeLabel}验证码`, html)
 }
 
-async function sendNotificationEmail(toEmail, fromUserName, notifType, targetTitle, content) {
-	const tp = getTransporter()
-	if (!tp) {
-		console.warn('[Mailer] 邮件服务未配置，跳过通知邮件')
-		return
-	}
+// 发送通知邮件
+async function sendNotificationEmail(db, toEmail, fromUserName, notifType, targetTitle, content) {
 	const typeLabels = { 1: '赞', 2: '评论', 3: '关注', 6: '收藏' }
-	const typeLabel = typeLabels[notifType] || '互动'
 	const actionTexts = { 1: '赞了你的动态', 2: '评论了你的动态', 3: '关注了你', 6: '收藏了你的动态' }
 	const actionText = actionTexts[notifType] || '与你互动'
 	const html = `
@@ -90,18 +79,10 @@ async function sendNotificationEmail(toEmail, fromUserName, notifType, targetTit
 </div>`
 
 	try {
-		const fromName = MAIL_FROM || '留笔'
-		const fromEmail = MAIL_USER
-		const info = await tp.sendMail({
-			from: `"${fromName}" <${fromEmail}>`,
-			to: toEmail,
-			subject: `【留笔】${fromUserName}${actionText}`,
-			html
-		})
-		console.log('[Mailer] 通知邮件已发送:', toEmail, info.messageId || '')
+		await sendMail(db, toEmail, `【留笔】${fromUserName}${actionText}`, html)
 	} catch (e) {
 		console.error('[Mailer] 通知邮件发送失败:', e.message)
 	}
 }
 
-module.exports = { sendVerifyCode, sendNotificationEmail }
+module.exports = { sendMail, sendVerifyCode, sendNotificationEmail }

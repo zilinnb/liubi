@@ -87,6 +87,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     final codeCtrl = TextEditingController();
     bool codeSent = false;
     int countdown = 0;
+    bool sendingCode = false;
 
     showModalBottomSheet(
       context: context,
@@ -107,31 +108,40 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                   children: [
                     Expanded(child: TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '请输入新邮箱号', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12)))),
                     GestureDetector(
-                      onTap: countdown > 0 ? null : () async {
+                      onTap: (countdown > 0 || sendingCode) ? null : () async {
                         final email = emailCtrl.text.trim();
                         if (email.isEmpty || !email.contains('@')) {
                           AppToast.error(ctx, message: '请输入正确的邮箱');
                           return;
                         }
+                        ms(() { sendingCode = true; });
                         try {
-                          final res = await ApiService().post('/auth/send-code', data: {'email': email});
-                          if (res['code'] == 200) {
-                            ms(() { codeSent = true; countdown = 60; });
-                            AppToast.success(ctx, message: '验证码已发送');
-                            _startCountdown(ctx, ms, (c) { countdown = c; });
-                          } else {
-                            AppToast.error(ctx, message: res['msg'] ?? '发送失败');
+                          final res = await ApiService().post('/auth/send-code', data: {'email': email, 'type': 4});
+                          if (ctx.mounted) {
+                            if (res['code'] == 200) {
+                              ms(() { codeSent = true; countdown = 60; sendingCode = false; });
+                              AppToast.success(ctx, message: '验证码已发送');
+                              _startCountdown(ctx, ms, (c) { countdown = c; });
+                            } else {
+                              ms(() { sendingCode = false; });
+                              AppToast.error(ctx, message: res['msg'] ?? '发送失败');
+                            }
                           }
                         } catch (_) {
-                          AppToast.error(ctx, message: '发送失败');
+                          if (ctx.mounted) {
+                            ms(() { sendingCode = false; });
+                            AppToast.error(ctx, message: '发送失败');
+                          }
                         }
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Text(
-                          countdown > 0 ? '${countdown}s' : '获取验证码',
-                          style: TextStyle(fontSize: 13, color: countdown > 0 ? const Color(0xFFCCCCCC) : const Color(0xFFFF2442), fontWeight: FontWeight.w500),
-                        ),
+                        child: sendingCode
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF999999)))
+                          : Text(
+                              countdown > 0 ? '${countdown}s' : '获取验证码',
+                              style: TextStyle(fontSize: 13, color: countdown > 0 ? const Color(0xFFCCCCCC) : const Color(0xFFFF2442), fontWeight: FontWeight.w500),
+                            ),
                       ),
                     ),
                   ],

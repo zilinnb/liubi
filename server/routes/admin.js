@@ -1,6 +1,4 @@
 const express = require('express')
-const fs = require('fs')
-const path = require('path')
 const db = require('../config/db')
 const { adminAuth } = require('../middleware/auth')
 const router = express.Router()
@@ -266,44 +264,39 @@ router.delete('/conversations/:id', async (req, res) => {
 // 邮箱配置
 router.get('/email-config', async (req, res) => {
 	try {
-		const envPath = path.join(__dirname, '..', '.env')
-		if (!fs.existsSync(envPath)) return res.json({ code: 200, data: {} })
-		const content = fs.readFileSync(envPath, 'utf-8')
-		const data = {}
-		content.split('\n').forEach(line => {
-			const m = line.match(/^MAIL_(\w+)=(.*)$/)
-			if (m) data[m[1].toLowerCase()] = m[2].trim()
-		})
-		res.json({ code: 200, data })
+		const [rows] = await db.query("SELECT `key`, `value`, description FROM email_config")
+		const config = {}
+		rows.forEach(r => { config[r.key] = r.value })
+		res.json({ code: 200, data: config })
 	} catch (e) {
-		res.json({ code: 500, msg: '服务器错误' })
+		res.json({ code: 500, msg: '获取失败' })
 	}
 })
 
 router.put('/email-config', async (req, res) => {
 	try {
-		const envPath = path.join(__dirname, '..', '.env')
-		let content = ''
-		if (fs.existsSync(envPath)) content = fs.readFileSync(envPath, 'utf-8')
-
-		const fields = { host: 'MAIL_HOST', port: 'MAIL_PORT', secure: 'MAIL_SECURE', user: 'MAIL_USER', pass: 'MAIL_PASS', from: 'MAIL_FROM' }
-		for (const [key, envKey] of Object.entries(fields)) {
+		const fields = ['smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'smtp_pass', 'smtp_from', 'smtp_from_name']
+		for (const key of fields) {
 			if (req.body[key] !== undefined) {
-				const regex = new RegExp(`^${envKey}=.*$`, 'm')
-				const newLine = `${envKey}=${req.body[key]}`
-				if (regex.test(content)) {
-					content = content.replace(regex, newLine)
-				} else {
-					content += `\n${newLine}`
-				}
+				await db.query('INSERT INTO email_config (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?', [key, String(req.body[key]), String(req.body[key])])
 			}
 		}
-
-		fs.writeFileSync(envPath, content, 'utf-8')
-		res.json({ code: 200, msg: '保存成功，需重启后端生效' })
+		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
-		console.error(e)
-		res.json({ code: 500, msg: '保存失败' })
+		res.json({ code: 500, msg: '更新失败' })
+	}
+})
+
+// 测试发送邮件
+router.post('/email-test', async (req, res) => {
+	try {
+		const { to } = req.body
+		if (!to) return res.json({ code: 400, msg: '请输入收件邮箱' })
+		const { sendMail } = require('../utils/mailer')
+		await sendMail(db, to, '留笔 - 邮件测试', '<div style="padding:20px;background:#f8f8f8;border-radius:8px;"><h2 style="color:#FF2442;">邮件测试</h2><p>如果您收到此邮件，说明邮箱配置正确。</p><p style="color:#999;font-size:12px;">发送时间：' + new Date().toLocaleString('zh-CN') + '</p></div>')
+		res.json({ code: 200, msg: '测试邮件已发送' })
+	} catch (e) {
+		res.json({ code: 500, msg: '发送失败：' + e.message })
 	}
 })
 

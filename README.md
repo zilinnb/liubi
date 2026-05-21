@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.6-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.0.8-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">留笔 Liubi</h1>
@@ -43,17 +43,33 @@
 - **链接识别**：文本中 URL 自动识别，红色下划线可点击，调用内置浏览器
 - **私密发布**：帖子可设为私密，仅自己可见
 
+### 💰 留币系统
+- **签到领币**：每日签到获取留币，连续签到奖励递增
+- **红包系统**：发帖时可附带红包，其他用户抢红包获取留币
+- **赞赏功能**：对帖子进行留币赞赏，支持自定义金额
+- **交易记录**：完整的收支明细，余额/总赚/总花统计
+- **留币配置**：管理员可配置签到基础奖励、最大奖励、经验奖励等
+
+### 🏆 等级系统
+- **12级等级**：从"初来乍到"到"返璞归真"，葫芦侠风格等级体系
+- **经验获取**：签到/发帖/评论/被赞/被收藏等行为获取经验值
+- **等级徽章**：全场景展示等级徽章（帖子卡片/评论/聊天/个人主页/发现页）
+- **等级颜色**：1-3级灰色/4-6级蓝色/7-9级紫色/10-12级金色
+- **经验进度条**：个人主页展示升级进度，显示当前/下一级所需经验
+- **分类等级限制**：分类可设置最低发帖等级要求，低等级用户无法发布
+
 ### 💬 社交互动
 - **点赞/收藏**：弹跳动画特效，实时计数更新
 - **评论系统**：楼中楼嵌套回复，评论点赞动画，图片评论
 - **@提及**：评论中 `@用户名` 自动补全，发送通知
 - **关注体系**：关注/粉丝双向关系，互关/回关/已关注状态，隐私控制
 - **分类社区**：贴吧风格分类，关注/发帖/置顶/热门
+- **密码找回**：通过邮箱验证码重置密码，5分钟有效期
 
 ### 📡 实时通讯
 - **私聊**：WebSocket 实时消息，文字/图片消息
 - **群聊**：群号加入，群成员管理
-- **消息撤回**：2分钟内可撤回
+- **语音录制**：微信风格声波动画，上滑取消发送
 - **会话管理**：置顶/标为已读/删除，即时生效
 - **系统通知**：后台运行时弹出系统通知栏消息，点击跳转对应页面
 - **心跳保活**：30秒心跳，自动重连（递增延迟，最多10次）
@@ -65,6 +81,8 @@
 
 ### 🔧 管理后台
 - **8大模块**：统计/用户/帖子/评论/分类/会话/邮箱配置/AI配置
+- **独立后台**：管理后台迁移为独立SPA应用，`/admin`路径访问
+- **邮箱配置**：从.env文件迁移到数据库存储，支持在线修改和测试发送
 - **用户管理**：禁用/禁言/角色切换
 - **内容审核**：帖子下架/评论删除/分类管理
 - **版本管理**：发布新版本，强制更新控制
@@ -73,7 +91,7 @@
 
 ## 界面一览
 
-### 主要界面（26个）
+### 主要界面（27个）
 
 | 界面 | 文件 | 功能说明 |
 |------|------|----------|
@@ -81,23 +99,24 @@
 | 首页 | `home_screen.dart` | 分类Tab切换 + 瀑布流帖子列表，下拉刷新/上拉加载/回到顶部 |
 | 发现页 | `discover_screen.dart` | 热门帖子、推荐用户、在线人数、分类入口、数据统计 |
 | 消息页 | `message_screen.dart` | 聊天会话列表，长按浮动菜单（置顶/已读/删除），未读角标 |
-| 我的 | `mine_screen.dart` | 小红书风格个人信息页，折叠顶栏，帖子/收藏/赞过/动态四Tab |
-| 发布页 | `publish_screen.dart` | 块编辑器，文字/图片/语音/链接块，录音、话题标签 |
-| 详情页 | `detail_screen.dart` | 帖子内容、图片预览(保存)、语音播放、评论列表(楼中楼)、点赞/收藏/分享、互关/回关状态 |
-| 聊天页 | `chat_screen.dart` | 私聊/群聊，消息撤回，本地缓存(200条/会话) |
+| 我的 | `mine_screen.dart` | 小红书风格个人信息页，折叠顶栏，帖子/收藏/赞过/动态四Tab，等级徽章/经验进度条/留币入口 |
+| 发布页 | `publish_screen.dart` | 块编辑器，文字/图片/语音/链接块，录音、话题标签、红包、分类等级限制提示 |
+| 详情页 | `detail_screen.dart` | 帖子内容、图片预览(保存/分享)、语音播放、评论列表(楼中楼/等级徽章)、赞赏列表、点赞/收藏/分享、互关/回关状态 |
+| 聊天页 | `chat_screen.dart` | 私聊/群聊，消息撤回，微信风格语音录制动画，本地缓存(200条/会话) |
 | 登录页 | `login_screen.dart` | 密码登录、验证码登录、邮箱注册，原生加载指示器 |
 | 搜索页 | `search_screen.dart` | 搜索帖子/用户，热门关键词，搜索历史 |
 | AI聊天 | `ai_chat_screen.dart` | DeepSeek对话，流式输出，Mac风格代码块 |
 | 分类详情 | `category_screen.dart` | 贴吧风格，分类信息/关注/最新/热门/赞过/置顶帖 |
-| 他人主页 | `user_profile_screen.dart` | 小红书风格用户主页，折叠顶栏，互关/回关/已关注状态，隐私保护，动态Tab |
+| 他人主页 | `user_profile_screen.dart` | 小红书风格用户主页，折叠顶栏，互关/回关/已关注状态，隐私保护，动态Tab，等级徽章/经验进度条/留币 |
 | 编辑资料 | `edit_profile_screen.dart` | 头像/背景图/昵称/简介/性别/生日(中式)/地区 |
 | 通知列表 | `notification_list_screen.dart` | 赞/评论/关注/系统 分Tab展示 |
-| 设置页 | `settings_screen.dart` | 缓存清理、版本更新、关于、退出登录 |
-| 隐私设置 | `privacy_settings_screen.dart` | 关注/粉丝/获赞与收藏/动态列表隐私，修改用户名/邮箱(验证码)/密码 |
+| 设置页 | `settings_screen.dart` | 缓存清理、版本更新、关于、退出登录、邮箱验证码找回密码 |
+| 隐私设置 | `privacy_settings_screen.dart` | 关注/粉丝/获赞与收藏/动态列表隐私，修改用户名/邮箱(验证码)/密码，发送验证码加载状态 |
 | 通知设置 | `notification_settings_screen.dart` | 推送/赞/评论/关注/收藏/聊天 通知开关 |
 | 内置浏览器 | `in_app_browser_screen.dart` | WebView，顶栏导航，更多菜单(复制链接/浏览器打开/刷新) |
-| 图片查看器 | `image_viewer_screen.dart` | 全屏查看，左右滑动，长按保存(小红书风格弹窗) |
-| 管理后台 | `admin_screen.dart` | 8Tab管理面板，仅管理员可用 |
+| 图片查看器 | `image_viewer_screen.dart` | 全屏查看，左右滑动，保存/分享(小红书风格弹窗) |
+| 留币中心 | `coin_center_screen.dart` | 留币余额、签到领币、交易记录、红包/赞赏入口 |
+| 管理后台 | `admin/` | 独立SPA管理面板，`/admin`路径访问 |
 | 热门榜单 | `trending_screen.dart` | 热门/最新两个Tab |
 | 关于页 | `about_screen.dart` | 应用版本信息，用户协议/隐私政策(内置浏览器) |
 | 关注/粉丝 | `follow_list_screen.dart` | 关注列表/粉丝列表 |
@@ -181,7 +200,7 @@ liubi/
 ├── liubi_app/                        # Flutter 前端
 │   ├── lib/
 │   │   ├── main.dart                 # 入口：路由、主题、Provider注册
-│   │   ├── screens/                  # 界面层 (26个)
+│   │   ├── screens/                  # 界面层 (27个)
 │   │   │   ├── main_screen.dart      # 主框架(4Tab)
 │   │   │   ├── home_screen.dart      # 首页(瀑布流)
 │   │   │   ├── discover_screen.dart  # 发现页
@@ -192,39 +211,41 @@ liubi/
 │   │   │   ├── chat_screen.dart      # 聊天
 │   │   │   ├── login_screen.dart     # 登录/注册
 │   │   │   ├── ai_chat_screen.dart   # AI助手
-│   │   │   ├── admin_screen.dart     # 管理后台
+│   │   │   ├── coin_center_screen.dart # 留币中心
 │   │   │   └── ...                   # 其他界面
 │   │   ├── providers/                # 状态管理
 │   │   │   ├── post_provider.dart    # 帖子状态
 │   │   │   └── user_provider.dart    # 用户状态
-│   │   ├── models/                   # 数据模型 (6个)
+│   │   ├── models/                   # 数据模型 (7个，含LevelInfo)
 │   │   ├── services/                 # 服务层 (5个)
 │   │   │   ├── api_service.dart      # HTTP客户端(Dio)
 │   │   │   ├── chat_service.dart     # WebSocket服务
 │   │   │   ├── storage_service.dart  # 本地存储
 │   │   │   ├── notification_service.dart # 系统通知
 │   │   │   └── update_service.dart   # 版本更新
-│   │   ├── widgets/                  # 通用组件 (11个)
+│   │   ├── widgets/                  # 通用组件 (含level_badge等)
 │   │   └── utils/                    # 工具类
 │   ├── android/                      # Android原生配置
 │   └── pubspec.yaml                  # 依赖配置
 │
 ├── server/                           # Node.js 后端
 │   ├── server.js                     # 入口：Express+WebSocket+自动建表
-│   ├── routes/                       # API路由 (13个)
-│   │   ├── auth.js                   # 认证(注册/登录/验证码)
-│   │   ├── posts.js                  # 帖子(CRUD/点赞/收藏/搜索)
-│   │   ├── comments.js               # 评论(楼中楼/点赞)
-│   │   ├── users.js                  # 用户(资料/关注/隐私)
-│   │   ├── categories.js             # 分类(社区/关注)
-│   │   ├── chat.js                   # 聊天(私聊/群聊/撤回)
+│   ├── routes/                       # API路由 (15个)
+│   │   ├── auth.js                   # 认证(注册/登录/验证码/留币/等级)
+│   │   ├── posts.js                  # 帖子(CRUD/点赞/收藏/等级信息/经验奖励)
+│   │   ├── comments.js               # 评论(楼中楼/点赞/等级信息/经验奖励)
+│   │   ├── users.js                  # 用户(资料/关注/隐私/留币/等级/密码找回)
+│   │   ├── categories.js             # 分类(社区/关注/等级限制)
+│   │   ├── chat.js                   # 聊天(私聊/群聊/撤回/等级信息)
 │   │   ├── messages.js               # 消息通知
 │   │   ├── notifications.js          # 通知(未读统计)
 │   │   ├── upload.js                 # 文件上传
 │   │   ├── ai.js                     # AI对话(DeepSeek)
 │   │   ├── version.js                # 版本管理
-│   │   ├── admin.js                  # 管理后台
-│   │   └── stats.js                  # 统计(在线/总览)
+│   │   ├── admin.js                  # 管理后台(邮箱配置数据库化/测试发送)
+│   │   ├── stats.js                  # 统计(在线/总览/数据库状态/运行时间)
+│   │   ├── coins.js                  # 留币(签到/红包/赞赏/交易/配置)
+│   │   └── level-config.js           # 等级配置(12级经验值表/经验规则)
 │   ├── config/                       # 数据库/环境配置
 │   ├── middleware/                    # JWT认证中间件
 │   ├── utils/                        # 工具(邮件/IP/WS)
@@ -237,7 +258,7 @@ liubi/
 
 ## 数据库设计
 
-共 **20张表**，分为6大体系：
+共 **24张表**，分为8大体系：
 
 ### 用户体系
 | 表名 | 说明 |
@@ -245,6 +266,7 @@ liubi/
 | `users` | 用户表（昵称/头像/简介/性别/生日/地区/角色/隐私设置） |
 | `follows` | 关注关系表（follower_id + following_id 联合唯一） |
 | `verify_codes` | 验证码表（邮箱/验证码/类型/过期时间5分钟） |
+| `reset_codes` | 密码重置验证码表（邮箱/验证码/过期时间5分钟） |
 
 ### 内容体系
 | 表名 | 说明 |
@@ -252,7 +274,7 @@ liubi/
 | `posts` | 帖子表（标题/内容/分类/类型/语音/链接/内容块JSON/私密标记） |
 | `post_images` | 帖子图片表（URL/媒体类型/宽高比/排序） |
 | `comments` | 评论表（楼中楼parent_id/图片/点赞数/置顶） |
-| `categories` | 分类表（名称/图标/描述/热度/关注数/发帖限制） |
+| `categories` | 分类表（名称/图标/描述/热度/关注数/发帖限制/最低等级要求） |
 | `category_follows` | 分类关注表 |
 
 ### 互动体系
@@ -270,6 +292,26 @@ liubi/
 | `chat_conversations` | 会话表（私聊/群聊/群号） |
 | `chat_members` | 成员表（置顶/隐藏标记） |
 | `chat_messages` | 消息表（文本/图片/系统消息/撤回标记） |
+
+### 留币体系
+| 表名 | 说明 |
+|------|------|
+| `user_coins` | 用户留币表（余额/总赚/总花/签到天数/上次签到） |
+| `coin_transactions` | 留币交易记录表（类型/金额/关联ID/备注） |
+| `coin_config` | 留币配置表（签到基础奖励/最大奖励/经验奖励等） |
+| `redpackets` | 红包表（总金额/个数/剩余/消息/关联帖子） |
+| `redpacket_records` | 红包领取记录表（用户/金额/时间） |
+| `appreciations` | 赞赏表（帖子/金额/赞赏者） |
+
+### 等级体系
+| 表名 | 说明 |
+|------|------|
+| `user_levels` | 用户等级表（经验值/等级自动计算） |
+
+### 配置体系
+| 表名 | 说明 |
+|------|------|
+| `email_config` | 邮箱配置表（SMTP地址/端口/账号/密码/发件人，数据库存储替代.env） |
 
 ### 其他
 | 表名 | 说明 |
@@ -367,18 +409,19 @@ flutter build apk --release
 
 | 模块 | 前缀 | 端点数 | 核心功能 |
 |------|------|--------|----------|
-| 认证 | `/api/auth` | 10 | 注册/登录/验证码/修改资料/密码/邮箱 |
-| 帖子 | `/api/posts` | 11 | CRUD/点赞/收藏/搜索/热门/置顶/私密 |
-| 评论 | `/api/comments` | 5 | 发表/删除/点赞/置顶 |
-| 用户 | `/api/users` | 12 | 资料/关注/帖子/粉丝/动态/隐私 |
+| 认证 | `/api/auth` | 10 | 注册/登录/验证码/修改资料/密码/邮箱/留币/等级数据 |
+| 帖子 | `/api/posts` | 11 | CRUD/点赞/收藏/搜索/热门/置顶/私密/等级信息/发帖经验奖励 |
+| 评论 | `/api/comments` | 5 | 发表/删除/点赞/置顶/评论者等级信息/评论经验奖励 |
+| 用户 | `/api/users` | 14 | 资料/关注/帖子/粉丝/动态/隐私/留币/等级/密码找回 |
 | 分类 | `/api/categories` | 4 | 列表/详情/关注/帖子 |
 | 聊天 | `/api/chat` | 14 | 会话/消息/撤回/已读/置顶/群管理 |
 | 通知 | `/api/notifications` | 4 | 列表/未读/已读 |
 | 上传 | `/api/upload` | 2 | 单文件/多文件 |
 | AI | `/api/ai` | 3 | 对话/历史/清空 |
 | 版本 | `/api/version` | 5 | 检查更新/CRUD |
-| 管理 | `/api/admin` | 20+ | 统计/用户/帖子/分类/配置管理 |
-| 统计 | `/api/stats` | 2 | 在线人数/总览 |
+| 管理 | `/api/admin` | 20+ | 统计/用户/帖子/分类/配置管理/邮箱测试发送 |
+| 统计 | `/api/stats` | 2 | 在线人数/总览/数据库状态/Node版本/运行时间 |
+| 留币 | `/api/coins` | 10+ | 余额/签到/红包/赞赏/交易记录/配置管理 |
 | WebSocket | `/ws` | - | 实时聊天/通知推送/心跳/在线广播 |
 
 ---
@@ -411,6 +454,7 @@ pm2 save
 
 | 版本 | 构建号 | 说明 |
 |------|--------|------|
+| Beta 0.0.8 | 107 | 留币系统（签到/红包/赞赏/交易记录）、等级系统（12级/经验值/等级徽章/分类等级限制）、管理后台独立SPA化、邮箱配置数据库化、密码找回、微信风格语音录制动画、图片分享、AI生成页重设计、纯文字卡片优化、等级徽章全场景展示 |
 | Beta 0.0.6 | 105 | 表情消息支持、Live Photo支持、分类页优化、语音消息显示优化、AI聊天键盘遮挡修复 |
 
 ---

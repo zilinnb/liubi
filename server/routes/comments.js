@@ -2,6 +2,8 @@ const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
 const { getIpLocation, getClientIp } = require('../utils/ip-location')
+const { addExp } = require('./coins')
+const { EXP_RULES, getLevelInfo } = require('./level-config')
 const { pushNotification } = require('../utils/ws-helper')
 const router = express.Router()
 
@@ -78,6 +80,14 @@ router.get('/post/:postId', async (req, res) => {
 			replyUsers.forEach(u => { replyToUserMap[u.id] = u.nickname })
 		}
 
+		// 批量查询评论者等级
+		const commenterIds = [...new Set(rows.map(r => r.user_id))]
+		let commentLevelMap = {}
+		if (commenterIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [commenterIds])
+			levelRows.forEach(lr => { commentLevelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+
 		const map = {}
 		const list = []
 		rows.forEach(r => {
@@ -86,7 +96,8 @@ router.get('/post/:postId', async (req, res) => {
 				is_pinned: Number(r.is_pinned) || 0,
 				subComments: [],
 				isLiked: likedSet.has(r.id),
-				reply_to_nickname: r.reply_to_user_id ? (replyToUserMap[r.reply_to_user_id] || '') : ''
+				reply_to_nickname: r.reply_to_user_id ? (replyToUserMap[r.reply_to_user_id] || '') : '',
+				level_info: commentLevelMap[r.user_id] || null,
 			}
 			map[r.id] = item
 		})
@@ -149,6 +160,7 @@ router.post('/', auth, async (req, res) => {
 		}
 
 		res.json({ code: 200, msg: '评论成功', data: { id: result.insertId, location } })
+		addExp(req.user.id, EXP_RULES.comment).catch(() => {})
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })

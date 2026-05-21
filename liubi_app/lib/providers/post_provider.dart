@@ -458,4 +458,39 @@ class PostProvider with ChangeNotifier {
     }
     return urls;
   }
+
+  // 红包相关
+  Future<Map<String, dynamic>> sendRedpacket({required int totalCoins, required int totalCount, String message = '恭喜发财', int? postId}) async {
+    return await ApiService().post('/coins/redpacket/send', data: {
+      'total_coins': totalCoins,
+      'total_count': totalCount,
+      'message': message,
+      'post_id': postId,
+    });
+  }
+
+  Future<Map<String, dynamic>> getCoinBalance() async {
+    return await ApiService().get('/coins/balance');
+  }
+
+  // 赞赏相关
+  Future<Map<String, dynamic>> appreciatePost({required int postId, required int amount}) async {
+    return await ApiService().post('/coins/appreciate', data: {
+      'post_id': postId,
+      'amount': amount,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAppreciations(int postId) async {
+    try {
+      final res = await ApiService().get('/coins/appreciations/$postId');
+      if (res['code'] == 200) {
+        final data = res['data'];
+        if (data is List) {
+          return List<Map<String, dynamic>>.from(data.map((e) => Map<String, dynamic>.from(e as Map)));
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
 }

@@ -12,7 +12,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../utils/image_picker_util.dart';
-import 'package:photo_view/photo_view.dart';
 import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
@@ -25,6 +24,7 @@ import 'package:extended_text_field/extended_text_field.dart';
 import 'package:dio/dio.dart';
 import 'package:gal/gal.dart';
 import '../widgets/app_toast.dart';
+import 'image_viewer_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final int conversationId;
@@ -78,6 +78,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   String? _recordPath;
   final AudioRecorder _recorder = AudioRecorder();
   AudioPlayer? _voicePlayer;
+
+  // 微信风格语音录制UI状态
+  double _recordSlideY = 0.0; // 上滑距离
+  bool _recordSlideUp = false; // 是否已上滑到取消区域
   int? _playingVoiceIdx;
   bool _voiceLoading = false;
 
@@ -301,6 +305,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   void _scheduleScrollToBottom() {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scrollToBottom();
+      // 额外延迟确保消息渲染完成
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) _scrollToBottom();
+      });
     });
   }
 
@@ -425,6 +433,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
         _recordCancelled = false;
         _recordSeconds = 0;
       });
+      _voiceWaveCtrl.repeat(); // 启动声波动画
       _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _recordSeconds++);
       });
@@ -436,11 +445,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   Future<void> _stopRecording({bool cancel = false}) async {
     _recordTimer?.cancel();
     _recordTimer = null;
+    _voiceWaveCtrl.stop(); // 停止声波动画
     if (cancel) {
       try { await _recorder.stop(); } catch (_) {}
       setState(() {
         _isRecording = false;
         _recordCancelled = false;
+        _recordSlideUp = false;
+        _recordSlideY = 0.0;
         _recordSeconds = 0;
         _recordPath = null;
       });
@@ -450,6 +462,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     final duration = _recordSeconds;
     setState(() {
       _isRecording = false;
+      _recordSlideUp = false;
+      _recordSlideY = 0.0;
       _recordSeconds = 0;
     });
     if (path == null || duration < 1) {
@@ -730,6 +744,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       setState(() {
         _showPlusPanel = true;
         _showEmojiPanel = false;
+        _isVoiceMode = false; // 点击加号时退出语音模式
       });
       _plusPanelCtrl.forward(from: 0);
       _focusNode.unfocus();
@@ -745,15 +760,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
 
   void _previewImage(String url) {
     final isLocal = !url.startsWith('http') && !url.startsWith('/');
-    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white), elevation: 0),
-      body: PhotoView(
-        imageProvider: isLocal ? AssetImage(url) : CachedNetworkImageProvider(url) as ImageProvider,
-        minScale: PhotoViewComputedScale.contained,
-        maxScale: PhotoViewComputedScale.covered * 3,
-      ),
-    )));
+    if (isLocal) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white), elevation: 0),
+        body: Center(child: Image.file(File(url), fit: BoxFit.contain)),
+      )));
+    } else {
+      ImageViewerScreen.openSingle(context, url: url);
+    }
   }
 
   String _formatChatTime(String? dateStr, int index) {
@@ -1084,29 +1099,39 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
                     onLongPressStart: (_) => _startRecording(),
                     onLongPressMoveUpdate: (details) {
                       final dy = details.globalPosition.dy;
-                      final screenHeight = MediaQuery.of(context).size.height;
-                      final cancelThreshold = screenHeight - 200;
-                      final shouldCancel = dy < cancelThreshold;
-                      if (shouldCancel != _recordCancelled) {
-                        setState(() => _recordCancelled = shouldCancel);
+                      final screenH = MediaQuery.of(context).size.height;
+                      // 上滑超过 80px 触发取消区域
+                      final slideUp = dy < screenH - 80;
+                      if (slideUp != _recordSlideUp) {
+                        setState(() {
+                          _recordSlideUp = slideUp;
+                          _recordCancelled = slideUp;
+                        });
                       }
+                      // 计算上滑距离用于动画
+                      final slideDistance = (screenH - 80 - dy).clamp(0.0, 200.0);
+                      setState(() => _recordSlideY = slideDistance);
                     },
                     onLongPressEnd: (_) => _stopRecording(cancel: _recordCancelled),
                     child: Container(
                       height: 36,
                       decoration: BoxDecoration(
-                        color: _isRecording ? (_recordCancelled ? const Color(0xFFFF4444) : const Color(0xFFE0E0E0)) : Colors.white,
+                        color: _isRecording
+                            ? (_recordSlideUp ? const Color(0xFFFF4444) : const Color(0xFFE0E0E0))
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(color: const Color(0xFFDFDFDF), width: 0.5),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         _isRecording
-                            ? (_recordCancelled ? '松开手指，取消发送' : '手指上滑，取消发送')
+                            ? (_recordSlideUp ? '松开手指，取消发送' : '手指上滑，取消发送')
                             : '按住 说话',
                         style: TextStyle(
                           fontSize: 15,
-                          color: _isRecording ? (_recordCancelled ? Colors.white : const Color(0xFF666666)) : const Color(0xFF666666),
+                          color: _isRecording
+                              ? (_recordSlideUp ? Colors.white : const Color(0xFF666666))
+                              : const Color(0xFF666666),
                           height: 1.0,
                         ),
                       ),
@@ -1148,6 +1173,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
                     setState(() {
                       _showPlusPanel = false;
                       _showEmojiPanel = true;
+                      _isVoiceMode = false; // 点击表情时退出语音模式
                     });
                   }
                 },
@@ -1173,39 +1199,125 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
             ],
           ),
           if (_isRecording)
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _recordCancelled ? const Color(0xFFFFF0F0) : const Color(0xFFF0F0F0),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 8, height: 8,
-                    decoration: BoxDecoration(
-                      color: _recordCancelled ? const Color(0xFFFF4444) : const Color(0xFF07C160),
-                      shape: BoxShape.circle,
-                    ),
+            _buildVoiceRecordOverlay(),
+        ],
+      ),
+    );
+  }
+
+  /// 微信风格语音录制全屏覆盖层
+  Widget _buildVoiceRecordOverlay() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        decoration: BoxDecoration(
+          color: _recordSlideUp ? const Color(0xFFFFF0F0) : const Color(0xFFF0F0F0),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 声波动画条
+            _buildVoiceWaveBars(),
+            const SizedBox(height: 16),
+            // 取消/发送提示
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // 取消按钮
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _recordSlideUp ? const Color(0xFFFF4444) : const Color(0xFFE0E0E0),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _recordCancelled
-                        ? '松开取消发送'
-                        : '正在录制 ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                  child: Text(
+                    '取消',
                     style: TextStyle(
-                      fontSize: 13,
-                      color: _recordCancelled ? const Color(0xFFFF4444) : const Color(0xFF333333),
+                      fontSize: 14,
+                      color: _recordSlideUp ? Colors.white : const Color(0xFF666666),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                ],
+                ),
+                // 中间提示文字
+                Column(
+                  children: [
+                    Text(
+                      _recordSlideUp ? '松开 取消' : '松开 发送',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: Color(0xFF333333),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _recordSlideUp
+                          ? '手指上滑，取消发送'
+                          : '手指上滑，取消发送',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF999999),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // 录制时长
+            Text(
+              '${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF999999),
+                fontWeight: FontWeight.w500,
               ),
             ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  /// 微信风格声波动画条（丝滑版，用AnimationController驱动）
+  Widget _buildVoiceWaveBars() {
+    return AnimatedBuilder(
+      animation: _voiceWaveCtrl,
+      builder: (_, __) {
+        return SizedBox(
+          height: 40,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: List.generate(20, (i) {
+              // 基础高度：中间高两边低的正弦包络
+              final envelope = sin((i / 19) * pi);
+              // 动态波动：多层正弦叠加，丝滑连续
+              final wave1 = sin(_voiceWaveCtrl.value * 2 * pi + i * 0.6) * 0.4;
+              final wave2 = sin(_voiceWaveCtrl.value * 2 * pi * 1.7 + i * 0.9) * 0.25;
+              final wave3 = sin(_voiceWaveCtrl.value * 2 * pi * 0.5 + i * 1.3) * 0.15;
+              final combined = envelope * (0.3 + wave1 + wave2 + wave3);
+              final h = (combined * 32 + 4).clamp(4.0, 36.0);
+              return Container(
+                width: 3,
+                height: h,
+                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                decoration: BoxDecoration(
+                  color: _recordSlideUp ? const Color(0xFFFF4444) : const Color(0xFF07C160),
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              );
+            }),
+          ),
+        );
+      },
     );
   }
 

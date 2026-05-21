@@ -80,6 +80,13 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
   int _currentTextIndex = 0;
   final Set<int> _expandedStacks = {};
 
+  // 红包相关
+  int? _redpacketId;
+  int _redpacketCoins = 0;
+  int _redpacketCount = 0;
+  String _redpacketMessage = '恭喜发财';
+  bool _hasRedpacket = false;
+
   VideoPlayerController? _livePhotoCtrl;
   bool _livePhotoPlaying = false;
   String? _livePhotoPath;
@@ -451,21 +458,27 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
             alignment: Alignment.center,
             child: _publishing
                 ? SizedBox(width: 20, height: 20, child: CupertinoActivityIndicator(radius: 10, color: Color(0xFFFF2442)))
-                : Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      _editingPostId != null ? '保存' : '发布',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: _canPublish ? Colors.white : const Color(0xFF999999),
-                        fontWeight: _canPublish ? FontWeight.w600 : FontWeight.w400,
+                : Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (_hasRedpacket) ...[
+                      const Icon(Icons.card_giftcard, size: 12, color: Color(0xFFFF2442)),
+                      const SizedBox(width: 2),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        _editingPostId != null ? '保存' : '发布',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: _canPublish ? Colors.white : const Color(0xFF999999),
+                          fontWeight: _canPublish ? FontWeight.w600 : FontWeight.w400,
+                        ),
                       ),
                     ),
-                  ),
+                  ]),
           ),
         ),
         const SizedBox(width: 8),
@@ -1359,6 +1372,14 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
               }
             },
           ),
+          _buildToolBtn(
+            _hasRedpacket ? Icons.card_giftcard : Icons.card_giftcard_outlined,
+            () {
+              setState(() => _showEmojiPanel = false);
+              _showRedpacketDialog();
+            },
+            color: _hasRedpacket ? const Color(0xFFFF2442) : null,
+          ),
           const Spacer(),
           if (_selectedCategoryName != null)
             Container(
@@ -1378,7 +1399,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     );
   }
 
-  Widget _buildToolBtn(IconData icon, VoidCallback onTap) {
+  Widget _buildToolBtn(IconData icon, VoidCallback onTap, {Color? color}) {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1386,7 +1407,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
         width: 48,
         height: 48,
         alignment: Alignment.center,
-        child: Icon(icon, size: 24, color: const Color(0xFF666666)),
+        child: Icon(icon, size: 24, color: color ?? const Color(0xFF666666)),
       ),
     );
   }
@@ -1438,6 +1459,184 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     return Container(width: width, height: height, color: const Color(0xFFF5F5F5));
   }
 
+  void _showRedpacketDialog() {
+    final coinsCtrl = TextEditingController(text: _hasRedpacket ? _redpacketCoins.toString() : '');
+    final countCtrl = TextEditingController(text: _hasRedpacket ? _redpacketCount.toString() : '');
+    final msgCtrl = TextEditingController(text: _hasRedpacket ? _redpacketMessage : '恭喜发财');
+    int? balance;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).padding.bottom),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 32, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: Row(children: [
+                  const Icon(Icons.card_giftcard, color: Color(0xFFFF2442), size: 24),
+                  const SizedBox(width: 8),
+                  const Text('发留币红包', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(width: 28, height: 28, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
+                  ),
+                ]),
+              ),
+              if (balance != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [
+                      const Icon(Icons.account_balance_wallet, size: 16, color: Color(0xFFFF9800)),
+                      const SizedBox(width: 6),
+                      Text('留币余额: $balance', style: const TextStyle(fontSize: 13, color: Color(0xFF795548), fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: TextField(
+                  controller: coinsCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: '总留币数',
+                    labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF999999)),
+                    prefixIcon: const Icon(Icons.monetization_on_outlined, size: 20, color: Color(0xFFFF9800)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFFF2442))),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: TextField(
+                  controller: countCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: '份数',
+                    labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF999999)),
+                    prefixIcon: const Icon(Icons.people_outline, size: 20, color: Color(0xFF3378E5)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFFF2442))),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: TextField(
+                  controller: msgCtrl,
+                  decoration: InputDecoration(
+                    labelText: '祝福语',
+                    labelStyle: const TextStyle(fontSize: 14, color: Color(0xFF999999)),
+                    prefixIcon: const Icon(Icons.favorite_border, size: 20, color: Color(0xFFFF2442)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE8E8E8))),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFFF2442))),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Row(children: [
+                  if (_hasRedpacket)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _hasRedpacket = false;
+                            _redpacketId = null;
+                            _redpacketCoins = 0;
+                            _redpacketCount = 0;
+                            _redpacketMessage = '恭喜发财';
+                          });
+                          Navigator.pop(ctx);
+                        },
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F5F5),
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Text('取消红包', style: TextStyle(fontSize: 15, color: Color(0xFF999999), fontWeight: FontWeight.w500)),
+                        ),
+                      ),
+                    ),
+                  if (_hasRedpacket) const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        final coins = int.tryParse(coinsCtrl.text) ?? 0;
+                        final count = int.tryParse(countCtrl.text) ?? 0;
+                        if (coins <= 0) {
+                          AppToast.error(context, message: '请输入留币数');
+                          return;
+                        }
+                        if (count <= 0) {
+                          AppToast.error(context, message: '请输入份数');
+                          return;
+                        }
+                        if (coins < count) {
+                          AppToast.error(context, message: '留币数不能少于份数');
+                          return;
+                        }
+                        setState(() {
+                          _hasRedpacket = true;
+                          _redpacketCoins = coins;
+                          _redpacketCount = count;
+                          _redpacketMessage = msgCtrl.text.trim().isEmpty ? '恭喜发财' : msgCtrl.text.trim();
+                        });
+                        Navigator.pop(ctx);
+                      },
+                      child: Container(
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF5A6E)]),
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text('确认', style: TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+          );
+        });
+      },
+    );
+    Provider.of<PostProvider>(context, listen: false).getCoinBalance().then((res) {
+      if (res['code'] == 200) {
+        // 更新弹窗中的余额显示 - 由于弹窗是StatefulBuilder，这里无法直接更新
+        // 余额信息会在下次打开时显示
+      }
+    });
+  }
+
   void _showTopicPicker() {
     final pp = Provider.of<PostProvider>(context, listen: false);
     final isAdmin = Provider.of<UserProvider>(context, listen: false).userInfo?.role == 1;
@@ -1487,8 +1686,14 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                 itemBuilder: (ctx, i) {
                   final cat = cats[i];
                   final isSelected = _selectedCategoryId == cat.id.toString();
+                  final userLevel = Provider.of<UserProvider>(context, listen: false).userInfo?.levelInfo?.level ?? 1;
+                  final isLocked = cat.minLevel > 0 && userLevel < cat.minLevel;
                   return GestureDetector(
                     onTap: () {
+                      if (isLocked) {
+                        AppToast.info(context, message: '等级>Lv.${cat.minLevel}才能选择此话题');
+                        return;
+                      }
                       setState(() {
                         _selectedCategoryId = cat.id.toString();
                         _selectedCategoryName = cat.name;
@@ -1498,7 +1703,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFFFF0F0) : const Color(0xFFF8F8F8),
+                        color: isLocked ? const Color(0xFFF5F5F5) : (isSelected ? const Color(0xFFFFF0F0) : const Color(0xFFF8F8F8)),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: isSelected ? const Color(0xFFFF2442) : Colors.transparent,
@@ -1511,11 +1716,13 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE),
+                              color: isLocked ? const Color(0xFFDDDDDD) : (isSelected ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE)),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Center(
-                              child: Text(
+                              child: isLocked
+                                  ? const Icon(Icons.lock_outline, size: 16, color: Color(0xFF999999))
+                                  : Text(
                                 '#',
                                 style: TextStyle(
                                   fontSize: 16,
@@ -1527,16 +1734,38 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Text(
-                              cat.name,
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: isSelected ? const Color(0xFFFF2442) : const Color(0xFF333333),
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                              ),
+                            child: Row(
+                              children: [
+                                Flexible(child: Text(
+                                  cat.name,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: isLocked ? const Color(0xFFBBBBBB) : (isSelected ? const Color(0xFFFF2442) : const Color(0xFF333333)),
+                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                  ),
+                                )),
+                                if (cat.minLevel > 0) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isLocked ? const Color(0xFFEEEEEE) : const Color(0xFFFFF0F0),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(isLocked ? Icons.lock_outline : Icons.star_outline, size: 10, color: isLocked ? const Color(0xFFBBBBBB) : const Color(0xFFFF2442)),
+                                        const SizedBox(width: 2),
+                                        Text('Lv.${cat.minLevel}', style: TextStyle(fontSize: 10, color: isLocked ? const Color(0xFFBBBBBB) : const Color(0xFFFF2442), fontWeight: FontWeight.w600)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          if (isSelected)
+                          if (isSelected && !isLocked)
                             Container(
                               width: 20,
                               height: 20,
@@ -1671,7 +1900,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
         content = contentBlocks[0]['content'];
       }
 
-      final data = {
+      final data = <String, dynamic>{
         'title': _titleCtrl.text.trim(),
         'content': content,
         'category_id': int.parse(_selectedCategoryId!),
@@ -1681,6 +1910,31 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
         'voice_duration': voiceDuration,
         'link': _items.where((i) => i.type == 'link').map((i) => i.linkUrl).firstWhere((u) => u.isNotEmpty, orElse: () => ''),
       };
+
+      // 如果有红包，先发红包获取redpacket_id
+      if (_hasRedpacket && _redpacketId == null) {
+        try {
+          final rpRes = await pp.sendRedpacket(
+            totalCoins: _redpacketCoins,
+            totalCount: _redpacketCount,
+            message: _redpacketMessage,
+          );
+          if (rpRes['code'] == 200 && rpRes['data']?['id'] != null) {
+            _redpacketId = rpRes['data']['id'] as int;
+            data['redpacket_id'] = _redpacketId;
+          } else {
+            if (mounted) AppToast.error(context, message: rpRes['msg'] ?? '红包发送失败');
+            setState(() => _publishing = false);
+            return;
+          }
+        } catch (e) {
+          if (mounted) AppToast.error(context, message: '红包发送失败');
+          setState(() => _publishing = false);
+          return;
+        }
+      } else if (_redpacketId != null) {
+        data['redpacket_id'] = _redpacketId;
+      }
 
       Map<String, dynamic> result;
       if (_editingPostId != null) {

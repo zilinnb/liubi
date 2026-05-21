@@ -424,8 +424,8 @@ router.get('/image/history', auth, async (req, res) => {
 		const limit = parseInt(req.query.limit) || 20
 		const offset = parseInt(req.query.offset) || 0
 		const [rows] = await db.query(
-			'SELECT id, prompt, image_url, status, created_at FROM ai_image_history WHERE user_id = ? AND status = ? ORDER BY id DESC LIMIT ? OFFSET ?',
-			[req.user.id, 'completed', limit, offset]
+			'SELECT id, prompt, image_url, status, created_at FROM ai_image_history WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+			[req.user.id, limit, offset]
 		)
 		res.json({ code: 200, data: rows })
 	} catch (e) {

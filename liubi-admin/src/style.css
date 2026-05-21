@@ -1,0 +1,10 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+body { background: #f5f6f7; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.el-button--primary { --el-button-bg-color: #FF2442; --el-button-border-color: #FF2442; --el-button-hover-bg-color: #e6203c; --el-button-hover-border-color: #e6203c; --el-button-active-bg-color: #cc1d36; --el-button-active-border-color: #cc1d36; }
+.el-menu-item.is-active { color: #FF2442 !important; }

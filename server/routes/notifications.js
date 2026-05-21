@@ -118,7 +118,7 @@ async function createNotification(toUserId, fromUserId, type, content, targetId)
 					if (postRows.length) targetTitle = postRows[0].title
 				}
 				const fromUserName = fromRows.length ? fromRows[0].nickname : '用户'
-				sendNotificationEmail(targetRows[0].email, fromUserName, type, targetTitle, content || '')
+				sendNotificationEmail(db, targetRows[0].email, fromUserName, type, targetTitle, content || '')
 			}
 		} catch(e) {
 			console.error('send notification email error:', e)

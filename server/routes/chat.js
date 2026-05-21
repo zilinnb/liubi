@@ -1,6 +1,7 @@
 const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
+const { getLevelInfo } = require('./level-config')
 const router = express.Router()
 
 // 获取会话列表
@@ -66,6 +67,17 @@ router.get('/conversations', auth, async (req, res) => {
 			}
 			list.push(item)
 		}
+
+		// 批量查询对方用户等级
+		const otherUserIds = list.map(c => c.other_user_id).filter(Boolean)
+		let chatLevelMap = {}
+		if (otherUserIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [otherUserIds])
+			levelRows.forEach(lr => { chatLevelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+		list.forEach(c => {
+			c.level_info = chatLevelMap[c.other_user_id] || null
+		})
 
 		list.sort((a, b) => new Date(b.last_time || b.updated_at) - new Date(a.last_time || a.updated_at))
 		res.json({ code: 200, data: list })

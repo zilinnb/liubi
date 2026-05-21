@@ -77,7 +77,7 @@ router.post('/send-code', async (req, res) => {
 
 		const typeLabel = { 1: '注册', 2: '登录', 3: '修改密码', 4: '绑定邮箱' }[type] || '验证'
 		try {
-			await sendVerifyCode(email, code, typeLabel)
+			await sendVerifyCode(db, email, code, typeLabel)
 		} catch (mailErr) {
 			return res.json({ code: 500, msg: mailErr.message || '验证码发送失败' })
 		}
@@ -304,7 +304,16 @@ router.get('/profile', auth, async (req, res) => {
 			[req.user.id]
 		)
 		if (!rows.length) return res.json({ code: 404, msg: '用户不存在' })
-		res.json({ code: 200, data: rows[0] })
+		const user = rows[0]
+		// 添加留币和等级数据
+		const { ensureUserRecords } = require('./coins')
+		const { getLevelInfo } = require('./level-config')
+		await ensureUserRecords(req.user.id)
+		const [coinRows] = await db.query('SELECT balance FROM user_coins WHERE user_id = ?', [req.user.id])
+		const [levelRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [req.user.id])
+		user.coins = coinRows[0]?.balance || 0
+		user.level_info = levelRows.length ? getLevelInfo(levelRows[0].exp) : null
+		res.json({ code: 200, data: user })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
 	}

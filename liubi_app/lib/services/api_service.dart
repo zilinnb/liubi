@@ -42,8 +42,13 @@ class ApiService {
     return response.data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> post(String path, {dynamic data, int? timeout}) async {
-    final options = timeout != null ? Options(receiveTimeout: Duration(seconds: timeout), sendTimeout: Duration(seconds: timeout)) : null;
+  Future<Map<String, dynamic>> post(String path, {dynamic data, int? timeout, bool noTimeout = false}) async {
+    Options? options;
+    if (noTimeout) {
+      options = Options(receiveTimeout: Duration.zero, sendTimeout: Duration.zero);
+    } else if (timeout != null) {
+      options = Options(receiveTimeout: Duration(seconds: timeout), sendTimeout: Duration(seconds: timeout));
+    }
     final response = await _dio.post(path, data: data, options: options);
     return response.data as Map<String, dynamic>;
   }

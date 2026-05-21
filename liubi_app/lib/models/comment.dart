@@ -1,3 +1,5 @@
+import 'user.dart';
+
 class Comment {
   final int id;
   final int postId;
@@ -16,6 +18,7 @@ class Comment {
   bool isLiked;
   final String nickname;
   final String avatar;
+  final LevelInfo? levelInfo;
   final List<Comment> subComments;
   final String createdAt;
 
@@ -37,6 +40,7 @@ class Comment {
     this.isLiked = false,
     this.nickname = '',
     this.avatar = '',
+    this.levelInfo,
     this.subComments = const [],
     this.createdAt = '',
   });
@@ -66,6 +70,9 @@ class Comment {
       isLiked: json['isLiked'] ?? json['is_liked'] ?? false,
       nickname: json['nickname'] ?? '',
       avatar: json['avatar'] ?? '',
+      levelInfo: json['level_info'] != null
+          ? LevelInfo.fromJson(json['level_info'] as Map<String, dynamic>)
+          : null,
       subComments: subs,
       createdAt: json['created_at'] ?? '',
     );
@@ -90,6 +97,7 @@ class Comment {
       'isLiked': isLiked,
       'nickname': nickname,
       'avatar': avatar,
+      'level_info': levelInfo?.toJson(),
       'subComments': subComments.map((e) => e.toJson()).toList(),
       'created_at': createdAt,
     };

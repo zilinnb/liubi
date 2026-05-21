@@ -7,11 +7,12 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../providers/user_provider.dart';
 import '../providers/post_provider.dart';
 import '../models/post.dart';
+import '../models/user.dart';
 import '../services/api_service.dart';
 import '../utils/helpers.dart';
 import '../widgets/post_card.dart';
 import '../widgets/app_toast.dart';
-import '../widgets/image_preview.dart';
+import 'image_viewer_screen.dart';
 import '../widgets/shimmer_skeleton.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -259,46 +260,55 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   @override
   Widget build(BuildContext context) {
     final statusBarH = MediaQuery.of(context).padding.top;
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: _loading
-          ? const Center(
-              child: CupertinoActivityIndicator(
-                  radius: 14, color: Color(0xFFFF2442)))
-          : NestedScrollView(
-              headerSliverBuilder: (ctx, _) => [
-                SliverAppBar(
-                  expandedHeight: statusBarH + 185,
-                  pinned: true,
-                  floating: false,
-                  snap: false,
-                  toolbarHeight: 44,
-                  backgroundColor: Colors.white,
-                  surfaceTintColor: Colors.transparent,
-                  scrolledUnderElevation: 0,
-                  elevation: 0,
-                  automaticallyImplyLeading: false,
-                  leadingWidth: 46,
-                  titleSpacing: 0,
-                  leading: _buildNavLeading(),
-                  title: _buildNavTitle(),
-                  flexibleSpace: _buildFlexibleSpace(statusBarH),
-                ),
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _TabCardDelegate(tabCtrl: _tabCtrl),
-                ),
-              ],
-              body: TabBarView(
-                controller: _tabCtrl,
-                children: [
-                  _buildPostGrid(_posts, _postsLoading),
-                  _buildPostGrid(_collects, _collectsLoading),
-                  _buildPostGrid(_likes, _likesLoading),
-                  _buildActivityTab(),
-                ],
-              ),
-            ),
+    return ValueListenableBuilder<double>(
+      valueListenable: _collapse,
+      builder: (_, cp, __) {
+        final style = cp < 0.5 ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: style,
+          child: Scaffold(
+            backgroundColor: Colors.white,
+            body: _loading
+                ? const Center(
+                    child: CupertinoActivityIndicator(
+                        radius: 14, color: Color(0xFFFF2442)))
+                : NestedScrollView(
+                    headerSliverBuilder: (ctx, _) => [
+                      SliverAppBar(
+                        expandedHeight: statusBarH + 215,
+                        pinned: true,
+                        floating: false,
+                        snap: false,
+                        toolbarHeight: 44,
+                        backgroundColor: Colors.white,
+                        surfaceTintColor: Colors.transparent,
+                        scrolledUnderElevation: 0,
+                        elevation: 0,
+                        automaticallyImplyLeading: false,
+                        leadingWidth: 46,
+                        titleSpacing: 0,
+                        leading: _buildNavLeading(),
+                        title: _buildNavTitle(),
+                        flexibleSpace: _buildFlexibleSpace(statusBarH),
+                      ),
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _TabCardDelegate(tabCtrl: _tabCtrl),
+                      ),
+                    ],
+                    body: TabBarView(
+                      controller: _tabCtrl,
+                      children: [
+                        _buildPostGrid(_posts, _postsLoading),
+                        _buildPostGrid(_collects, _collectsLoading),
+                        _buildPostGrid(_likes, _likesLoading),
+                        _buildActivityTab(),
+                      ],
+                    ),
+                  ),
+          ),
+        );
+      },
     );
   }
 
@@ -378,11 +388,14 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     final fansCount = _user?['fans_count'] as int? ?? 0;
     final likeCount = _user?['like_count'] as int? ?? 0;
     final location = _user?['location'] as String? ?? '';
+    final coins = _user?['coins'] as int? ?? 0;
+    final levelInfoRaw = _user?['level_info'] as Map<String, dynamic>?;
+    final levelInfo = levelInfoRaw != null ? LevelInfo.fromJson(levelInfoRaw) : null;
     final isSelf = Provider.of<UserProvider>(context, listen: false).userInfo?.id == widget.userId;
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final curH = constraints.biggest.height;
-      final totalExpand = statusBarH + 185.0;
+      final totalExpand = statusBarH + 215.0;
       final cp =
           (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0))
               .clamp(0.0, 1.0);
@@ -403,7 +416,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
             bottom: 0,
             child: GestureDetector(
               onTap: () {
-                if (hasBg) ImagePreview.open(context, url: fullUrl(bgImage));
+                if (hasBg) ImageViewerScreen.openSingle(context, url: fullUrl(bgImage));
               },
               child: Stack(
                 fit: StackFit.expand,
@@ -448,7 +461,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                       GestureDetector(
                         onTap: () {
                           if (avatarUrl.isNotEmpty) {
-                            ImagePreview.open(context, url: avatarUrl);
+                            ImageViewerScreen.openSingle(context, url: avatarUrl);
                           }
                         },
                         child: Container(
@@ -531,6 +544,28 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                         style: TextStyle(
                                             fontSize: 10,
                                             color: Color(0xFFFF2442))),
+                                  ),
+                                ],
+                                if (levelInfo != null) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: _getLevelColor(levelInfo.level).withValues(alpha: 0.2),
+                                      borderRadius:
+                                          BorderRadius.circular(3),
+                                      border: Border.all(
+                                          color: _getLevelColor(levelInfo.level).withValues(alpha: 0.4),
+                                          width: 0.5),
+                                    ),
+                                    child: Text(
+                                      'Lv.${levelInfo.level}',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: _getLevelColor(levelInfo.level),
+                                          fontWeight: FontWeight.w600),
+                                    ),
                                   ),
                                 ],
                               ],
@@ -616,6 +651,8 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                               child: _bgStatItem(
                                   fmtNum(likeCount), '获赞与收藏'),
                             ),
+                            const SizedBox(width: 24),
+                            _bgStatItem(fmtNum(coins), '留币'),
                           ],
                         ),
                       ),
@@ -660,6 +697,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                       ],
                     ],
                   ),
+                  _buildExpProgressBar(levelInfo),
                 ],
               ),
             ),
@@ -707,6 +745,48 @@ class _UserProfileScreenState extends State<UserProfileScreen>
         Text(label,
             style: const TextStyle(
                 fontSize: 11, color: Colors.white70)),
+      ],
+    );
+  }
+
+  Color _getLevelColor(int level) {
+    if (level <= 3) return const Color(0xFF999999);
+    if (level <= 6) return const Color(0xFF1890FF);
+    if (level <= 9) return const Color(0xFF722ED1);
+    return const Color(0xFFFAAD14);
+  }
+
+  Widget _buildExpProgressBar(LevelInfo? levelInfo) {
+    if (levelInfo == null) return const SizedBox.shrink();
+    final levelColor = _getLevelColor(levelInfo.level);
+    final isMaxLevel = levelInfo.nextLevelExp <= 0 || levelInfo.progress >= 1.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Text(
+              isMaxLevel ? '已满级' : 'Lv.${levelInfo.level} → Lv.${levelInfo.level + 1}  ${levelInfo.currentExp}/${levelInfo.nextLevelExp - levelInfo.exp + levelInfo.currentExp}',
+              style: const TextStyle(fontSize: 10, color: Colors.white70),
+            ),
+            const Spacer(),
+            Text(
+              isMaxLevel ? '' : '还需${(levelInfo.nextLevelExp - levelInfo.exp)}经验',
+              style: const TextStyle(fontSize: 9, color: Colors.white54),
+            ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: LinearProgressIndicator(
+            value: isMaxLevel ? 1.0 : levelInfo.progress.clamp(0.0, 1.0),
+            backgroundColor: Colors.white24,
+            valueColor: AlwaysStoppedAnimation<Color>(levelColor),
+            minHeight: 4,
+          ),
+        ),
       ],
     );
   }

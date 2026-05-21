@@ -16,7 +16,6 @@ import 'screens/edit_profile_screen.dart';
 import 'screens/publish_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/admin_screen.dart';
 import 'screens/ai_chat_screen.dart';
 import 'screens/ai_image_screen.dart';
 import 'screens/follow_list_screen.dart';
@@ -180,8 +179,6 @@ class LiubiApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const SearchScreen(), settings: settings);
             case '/settings':
               return MaterialPageRoute(builder: (_) => const SettingsScreen(), settings: settings);
-            case '/admin':
-              return MaterialPageRoute(builder: (_) => const AdminScreen(), settings: settings);
             case '/ai-chat':
               return MaterialPageRoute(builder: (_) => const AiChatScreen(), settings: settings);
             case '/ai-image':

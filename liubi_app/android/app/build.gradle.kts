@@ -1,11 +1,20 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val keystorePropertiesFile = file("../key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace = "com.liubi.liubi"
+    namespace = "com.liubi.app"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
@@ -21,26 +30,33 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../liubi.jks")
-            storePassword = "zzs5201314"
-            keyAlias = "liubi"
-            keyPassword = "zzs5201314"
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
     defaultConfig {
-        applicationId = "com.liubi.liubi"
-        minSdk = 24
+        applicationId = "com.liubi.app"
+        minSdk = flutter.minSdkVersion
         targetSdk = 36
-        versionCode = 106
-        versionName = "Beta 0.0.7"
+        versionCode = 107
+        versionName = "Beta 0.0.8"
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

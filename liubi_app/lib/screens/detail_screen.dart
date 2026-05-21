@@ -23,8 +23,9 @@ import '../utils/emoji_text.dart';
 import '../utils/emoji_assets.dart';
 import '../widgets/emoji_picker_panel.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/level_badge.dart';
 import 'package:extended_text_field/extended_text_field.dart';
-import '../widgets/image_preview.dart';
+import 'image_viewer_screen.dart';
 
 final _urlRegex = RegExp(r'https?://[^\s\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+');
 
@@ -90,6 +91,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   late AnimationController _collectBounceCtrl;
   final Map<int, AnimationController> _commentLikeCtrls = {};
   final Map<int, GlobalKey> _commentKeys = {};
+
+  // 赞赏相关
+  List<Map<String, dynamic>> _appreciations = [];
+  bool _appreciationsLoading = false;
+  bool _appreciationsExpanded = false;
 
   static const _tGrad = <List<Color>>[
     [Color(0xFFFFFFFF)],
@@ -208,6 +214,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
           debugPrint('[Detail] post loaded: id=${post.id}, title=${post.title}, blocks=${post.contentBlocks.length}, images=${post.images.length}');
           setState(() { _post = post; _isFollowing = post.isFollowed; _isFan = post.isFan; _loading = false; });
           _loadComments();
+          _loadAppreciations();
           _preloadLivePhotoVideos(post);
         } else if (res['code'] == 403) {
           setState(() { _loading = false; _isPrivateBlocked = true; _privateMsg = res['msg'] ?? '该图文已被对方私密，无法查看'; });
@@ -256,6 +263,185 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       if (widget.highlightCommentId != null && _commentPage == 1) {
         _scrollToCommentById(widget.highlightCommentId!);
       }
+    }
+  }
+
+  Future<void> _loadAppreciations() async {
+    setState(() => _appreciationsLoading = true);
+    final pp = Provider.of<PostProvider>(context, listen: false);
+    final list = await pp.fetchAppreciations(widget.postId);
+    if (mounted) {
+      setState(() {
+        _appreciations = list;
+        _appreciationsLoading = false;
+      });
+    }
+  }
+
+  void _showAppreciateDialog() {
+    int selectedAmount = 1;
+    bool isCustom = false;
+    final customCtrl = TextEditingController();
+    final customFocus = FocusNode();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).padding.bottom),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 32, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: Row(children: [
+                  Container(width: 36, height: 36, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B81)]), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.favorite, color: Colors.white, size: 20)),
+                  const SizedBox(width: 10),
+                  const Text('赞赏作者', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(width: 28, height: 28, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [1, 5, 10, 50].map((amount) {
+                    final selected = !isCustom && selectedAmount == amount;
+                    return GestureDetector(
+                      onTap: () { customFocus.unfocus(); setModalState(() { selectedAmount = amount; isCustom = false; }); },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          color: selected ? const Color(0xFFFFF0F0) : const Color(0xFFF8F8F8),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: selected ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE), width: selected ? 1.5 : 1),
+                          boxShadow: selected ? [BoxShadow(color: const Color(0xFFFF2442).withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2))] : [],
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('$amount', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: selected ? const Color(0xFFFF2442) : const Color(0xFF333333))),
+                            const Text('留币', style: TextStyle(fontSize: 10, color: Color(0xFF999999), fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: GestureDetector(
+                  onTap: () => setModalState(() { isCustom = true; customFocus.requestFocus(); }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: isCustom ? const Color(0xFFFFF0F0) : const Color(0xFFF8F8F8),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: isCustom ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE), width: isCustom ? 1.5 : 1),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.edit_outlined, size: 18, color: isCustom ? const Color(0xFFFF2442) : const Color(0xFF999999)),
+                      const SizedBox(width: 8),
+                      Text('自定义金额', style: TextStyle(fontSize: 14, color: isCustom ? const Color(0xFFFF2442) : const Color(0xFF666666), fontWeight: FontWeight.w500)),
+                      const Spacer(),
+                      SizedBox(
+                        width: 90,
+                        child: TextField(
+                          controller: customCtrl,
+                          focusNode: customFocus,
+                          keyboardType: TextInputType.number,
+                          enabled: isCustom,
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: isCustom ? const Color(0xFFFF2442) : const Color(0xFF999999)),
+                          decoration: const InputDecoration(
+                            hintText: '输入金额',
+                            hintStyle: TextStyle(fontSize: 13, color: Color(0xFFCCCCCC)),
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                            isDense: true,
+                          ),
+                          onChanged: (v) {
+                            final val = int.tryParse(v);
+                            if (val != null && val > 0) {
+                              setModalState(() { selectedAmount = val; });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text('留币', style: TextStyle(fontSize: 12, color: isCustom ? const Color(0xFFFF2442) : const Color(0xFF999999), fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: GestureDetector(
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    _doAppreciate(selectedAmount);
+                  },
+                  child: Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B81)]),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [BoxShadow(color: const Color(0xFFFF2442).withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
+                    ),
+                    alignment: Alignment.center,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.favorite, size: 18, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Text('赞赏 $selectedAmount 留币', style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          );
+        });
+      },
+    );
+  }
+
+  Future<void> _doAppreciate(int amount) async {
+    if (amount <= 0) {
+      AppToast.error(context, message: '请输入有效金额');
+      return;
+    }
+    _showActionLoading();
+    final pp = Provider.of<PostProvider>(context, listen: false);
+    final res = await pp.appreciatePost(postId: widget.postId, amount: amount);
+    _dismissActionLoading();
+    if (res['code'] == 200 && mounted) {
+      AppToast.success(context, message: '赞赏成功');
+      _loadAppreciations();
+    } else if (mounted) {
+      AppToast.error(context, message: res['msg'] ?? '赞赏失败');
     }
   }
 
@@ -335,7 +521,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   void _openGallery(List<String> urls, int initialIndex, {String? liveVideoUrl}) {
     _dismissKeyboard();
-    ImagePreview.open(context, url: fullUrl(urls[initialIndex]), liveVideoUrl: liveVideoUrl);
+    ImageViewerScreen.open(context, urls: urls.map((u) => fullUrl(u)).toList(), initialIndex: initialIndex);
   }
 
   void _setReplyTo(Comment c, {int? parentId, int? replyToUserId}) {
@@ -842,8 +1028,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     final isAuthor = _post!.userId == up.userInfo?.id;
     final isAdmin = up.userInfo?.role == 1;
 
-    if (!isAuthor && !isAdmin) return;
-
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -856,6 +1040,10 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Row(children: [
+                  if (!isAuthor) Expanded(child: _actionItem(Icons.favorite_outline, '赞赏', const Color(0xFFFF2442), () {
+                    Navigator.pop(context);
+                    _showAppreciateDialog();
+                  })),
                   if (isAuthor) Expanded(child: _actionItem(Icons.edit_outlined, '编辑', const Color(0xFF333333), () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/publish', arguments: _post).then((result) {
@@ -988,9 +1176,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                   : null,
                 actions: [
                   Consumer<UserProvider>(builder: (_, up, __) {
-                    final isAuthor = _post?.userId == up.userInfo?.id;
-                    final isAdmin = up.userInfo?.role == 1;
-                    if (!isAuthor && !isAdmin) return const SizedBox.shrink();
                     return GestureDetector(
                       onTap: _showPostMenu,
                       child: const Padding(padding: EdgeInsets.only(right: 14), child: Icon(Icons.more_vert, size: 22, color: Color(0xFF555555))),
@@ -1006,6 +1191,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                 SliverToBoxAdapter(child: _content()),
                 if (_post!.postType != 1) SliverToBoxAdapter(child: _tagRow()),
                 SliverToBoxAdapter(child: _dateRow()),
+                if (_appreciations.isNotEmpty) SliverToBoxAdapter(child: _appreciationSection()),
                 SliverToBoxAdapter(child: Container(height: 8, color: const Color(0xFFF5F5F5))),
                 SliverToBoxAdapter(child: _commentHeader()),
                 SliverList(delegate: SliverChildBuilderDelegate((_, i) {
@@ -1061,6 +1247,10 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Text(_post!.nickname, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
+            if (_post!.levelInfo != null) ...[
+              const SizedBox(width: 6),
+              LevelBadge(levelInfo: _post!.levelInfo, fontSize: 10),
+            ],
             if (_post!.isPrivate == 1) ...[const SizedBox(width: 6), const Icon(Icons.lock_outline, size: 13, color: Color(0xFF999999))],
           ]),
           Padding(padding: const EdgeInsets.only(top: 2), child: Text(fmtTime(_post!.createdAt), style: const TextStyle(fontSize: 11, color: Color(0xFFBBBBBB)))),
@@ -1660,6 +1850,83 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     ]));
   }
 
+  Widget _appreciationSection() {
+    if (_appreciations.isEmpty) return const SizedBox.shrink();
+    final displayList = _appreciationsExpanded ? _appreciations : _appreciations.take(10).toList();
+    final totalCount = _appreciations.length;
+    final totalCoins = _appreciations.fold<int>(0, (sum, a) => sum + ((a['amount'] as int?) ?? 0));
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F0),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFFE0B2), width: 0.5),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.favorite, size: 14, color: Color(0xFFFF2442)),
+          const SizedBox(width: 4),
+          Text('共 $totalCount 人赞赏', style: const TextStyle(fontSize: 12, color: Color(0xFF333333), fontWeight: FontWeight.w600)),
+          const SizedBox(width: 8),
+          Text('合计 $totalCoins 留币', style: const TextStyle(fontSize: 11, color: Color(0xFFFF9800), fontWeight: FontWeight.w500)),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: displayList.map((a) {
+            final avatar = a['avatar'] as String? ?? '';
+            final nickname = a['nickname'] as String? ?? '';
+            final amount = a['amount'] as int? ?? 0;
+            final av = fullUrl(avatar);
+            return GestureDetector(
+              onTap: () {
+                final userId = a['user_id'] as int?;
+                if (userId != null) Navigator.pushNamed(context, '/user-profile', arguments: userId);
+              },
+              child: Tooltip(
+                message: '$nickname 赞赏了 $amount 留币',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFFE0B2), width: 0.5),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    av.isNotEmpty
+                      ? CircleAvatar(radius: 10, backgroundImage: CachedNetworkImageProvider(av))
+                      : CircleAvatar(radius: 10, backgroundColor: getColorForId(a['user_id'] as int? ?? 0), child: Text(nickname.isNotEmpty ? nickname[0] : '?', style: const TextStyle(fontSize: 8, color: Colors.white))),
+                    const SizedBox(width: 3),
+                    Text('$amount', style: const TextStyle(fontSize: 10, color: Color(0xFFFF9800), fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        if (totalCount > 10 && !_appreciationsExpanded)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: GestureDetector(
+              onTap: () => setState(() => _appreciationsExpanded = true),
+              child: const Text('查看全部赞赏', style: TextStyle(fontSize: 12, color: Color(0xFF3378E5), fontWeight: FontWeight.w500)),
+            ),
+          ),
+        if (_appreciationsExpanded && totalCount > 10)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: GestureDetector(
+              onTap: () => setState(() => _appreciationsExpanded = false),
+              child: const Text('收起', style: TextStyle(fontSize: 12, color: Color(0xFF999999), fontWeight: FontWeight.w500)),
+            ),
+          ),
+      ]),
+    );
+  }
+
   Widget _commentHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
@@ -1705,6 +1972,10 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Text(c.nickname, style: const TextStyle(fontSize: 13, color: Color(0xFF666666), fontWeight: FontWeight.w500)),
+                if (c.levelInfo != null) ...[
+                  const SizedBox(width: 4),
+                  LevelBadge(levelInfo: c.levelInfo, fontSize: 9),
+                ],
                 if (isA) ...[ const SizedBox(width: 4), Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(3)), child: const Text('作者', style: TextStyle(fontSize: 9, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)))],
                 if (c.isPinned == 1) ...[ const SizedBox(width: 6), Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1), decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(3)), child: const Text('置顶', style: TextStyle(fontSize: 9, color: Color(0xFFFF2442), fontWeight: FontWeight.w500)))],
               ]),

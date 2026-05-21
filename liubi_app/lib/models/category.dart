@@ -9,6 +9,7 @@ class Category {
   final int postCount;
   final int status;
   final int publishRestriction;
+  final int minLevel;
 
   Category({
     required this.id,
@@ -21,6 +22,7 @@ class Category {
     this.postCount = 0,
     this.status = 1,
     this.publishRestriction = 0,
+    this.minLevel = 0,
   });
 
   factory Category.fromJson(Map<String, dynamic> json) {
@@ -35,6 +37,7 @@ class Category {
       postCount: json['post_count'] ?? 0,
       status: json['status'] ?? 1,
       publishRestriction: json['publish_restriction'] ?? 0,
+      minLevel: json['min_level'] ?? 0,
     );
   }
 
@@ -50,6 +53,7 @@ class Category {
       'post_count': postCount,
       'status': status,
       'publish_restriction': publishRestriction,
+      'min_level': minLevel,
     };
   }
 }

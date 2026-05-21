@@ -44,6 +44,13 @@ router.get('/overview', async (req, res) => {
 		if (_wsClients) {
 			onlineCount = _wsClients.size
 		}
+		// 数据库连接测试
+		let dbStatus = 'connected'
+		try {
+			await db.query('SELECT 1')
+		} catch (e) {
+			dbStatus = 'disconnected'
+		}
 		res.json({
 			code: 200,
 			data: {
@@ -54,6 +61,10 @@ router.get('/overview', async (req, res) => {
 				total_categories: catRows[0].total,
 				today_posts: todayPostRows[0].total,
 				today_users: todayUserRows[0].total,
+				node_version: process.version,
+				db_status: dbStatus,
+				server_time: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+				uptime: Math.floor(process.uptime() / 3600) + 'h',
 			}
 		})
 	} catch (e) {

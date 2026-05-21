@@ -2,6 +2,9 @@ const express = require('express')
 const db = require('../config/db')
 const { auth } = require('../middleware/auth')
 const { getIpLocation, getClientIp } = require('../utils/ip-location')
+const { addExp } = require('./coins')
+const { EXP_RULES } = require('./level-config')
+const { getLevelInfo } = require('./level-config')
 const { pushNotification } = require('../utils/ws-helper')
 const router = express.Router()
 
@@ -123,11 +126,19 @@ router.get('/', async (req, res) => {
 			})
 		}
 
+		// 批量查询作者等级
+		let levelMap = {}
+		if (postIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [rows.map(r => r.user_id)])
+			levelRows.forEach(lr => { levelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+
 		const [countRows] = await db.query(`SELECT COUNT(*) as total FROM posts p ${where}`, params)
 
 		const list = rows.map(r => ({
 			...r,
 			images: imgMap[r.id] || [],
+			level_info: levelMap[r.user_id] || null,
 			isLiked: false,
 			isCollected: false
 		}))
@@ -308,7 +319,11 @@ router.get('/:id', async (req, res) => {
 			ratio: i.ratio || 1.2
 		}))
 
-		const post = { ...rows[0], images, isLiked: false, isCollected: false, is_followed: false, is_fan: false }
+		// 查询作者等级
+		const [authorLevelRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [postRow.user_id])
+		const authorLevelInfo = authorLevelRows.length ? getLevelInfo(authorLevelRows[0].exp) : null
+
+		const post = { ...rows[0], images, level_info: authorLevelInfo, isLiked: false, isCollected: false, is_followed: false, is_fan: false }
 
 		if (post.content_blocks && typeof post.content_blocks === 'string') {
 			try { post.content_blocks = JSON.parse(post.content_blocks) } catch (e) { post.content_blocks = null }
@@ -356,9 +371,19 @@ router.post('/', auth, async (req, res) => {
 		if (!content && (!images || !images.length) && !voice_url) return res.json({ code: 400, msg: '内容必填' })
 
 		if (category_id) {
-			const [catRows] = await db.query('SELECT publish_restriction FROM categories WHERE id = ?', [category_id])
-			if (catRows.length && catRows[0].publish_restriction === 1 && req.user.role !== 1) {
-				return res.json({ code: 403, msg: '该分类为官方分类，仅管理员可发布' })
+			const [catRows] = await db.query('SELECT publish_restriction, min_level FROM categories WHERE id = ?', [category_id])
+			if (catRows.length) {
+				if (catRows[0].publish_restriction === 1 && req.user.role !== 1) {
+					return res.json({ code: 403, msg: '该分类为官方分类，仅管理员可发布' })
+				}
+				if (catRows[0].min_level > 0) {
+					const { getLevelInfo } = require('./level-config')
+					const [lvlRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [req.user.id])
+					const userLevel = getLevelInfo(lvlRows[0]?.exp || 0)
+					if (userLevel.level < catRows[0].min_level) {
+						return res.json({ code: 403, msg: `该分类需要Lv.${catRows[0].min_level}以上等级才能发布` })
+					}
+				}
 			}
 		}
 
@@ -395,6 +420,7 @@ router.post('/', auth, async (req, res) => {
 		await db.query('UPDATE users SET location = ? WHERE id = ?', [location, req.user.id])
 
 		res.json({ code: 200, msg: '发布成功', data: { id: result.insertId } })
+		addExp(req.user.id, EXP_RULES.post).catch(() => {})
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })

@@ -1,3 +1,43 @@
+class LevelInfo {
+  final int level;
+  final String title;
+  final int exp;
+  final int currentExp;
+  final int nextLevelExp;
+  final double progress;
+
+  LevelInfo({
+    this.level = 1,
+    this.title = '',
+    this.exp = 0,
+    this.currentExp = 0,
+    this.nextLevelExp = 100,
+    this.progress = 0.0,
+  });
+
+  factory LevelInfo.fromJson(Map<String, dynamic> json) {
+    return LevelInfo(
+      level: json['level'] ?? 1,
+      title: json['title'] ?? '',
+      exp: json['exp'] ?? 0,
+      currentExp: json['current_exp'] ?? 0,
+      nextLevelExp: json['next_level_exp'] ?? 100,
+      progress: (json['progress'] ?? 0.0).toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'level': level,
+      'title': title,
+      'exp': exp,
+      'current_exp': currentExp,
+      'next_level_exp': nextLevelExp,
+      'progress': progress,
+    };
+  }
+}
+
 class User {
   final int id;
   final String username;
@@ -14,6 +54,8 @@ class User {
   final int followCount;
   final int likeCount;
   final int collectCount;
+  final int coins;
+  final LevelInfo? levelInfo;
   final int status;
   final String location;
   final String phone;
@@ -40,6 +82,8 @@ class User {
     this.followCount = 0,
     this.likeCount = 0,
     this.collectCount = 0,
+    this.coins = 0,
+    this.levelInfo,
     this.status = 1,
     this.location = '',
     this.phone = '',
@@ -68,6 +112,10 @@ class User {
       followCount: json['follow_count'] ?? 0,
       likeCount: json['like_count'] ?? 0,
       collectCount: json['collect_count'] ?? 0,
+      coins: json['coins'] ?? 0,
+      levelInfo: json['level_info'] != null
+          ? LevelInfo.fromJson(json['level_info'] as Map<String, dynamic>)
+          : null,
       status: json['status'] ?? 1,
       location: json['location'] ?? '',
       phone: json['phone'] ?? '',
@@ -97,6 +145,8 @@ class User {
       'follow_count': followCount,
       'like_count': likeCount,
       'collect_count': collectCount,
+      'coins': coins,
+      'level_info': levelInfo?.toJson(),
       'status': status,
       'location': location,
       'phone': phone,
@@ -125,6 +175,8 @@ class User {
     int? followCount,
     int? likeCount,
     int? collectCount,
+    int? coins,
+    LevelInfo? levelInfo,
     int? status,
     String? location,
     String? phone,
@@ -151,6 +203,8 @@ class User {
       followCount: followCount ?? this.followCount,
       likeCount: likeCount ?? this.likeCount,
       collectCount: collectCount ?? this.collectCount,
+      coins: coins ?? this.coins,
+      levelInfo: levelInfo ?? this.levelInfo,
       status: status ?? this.status,
       location: location ?? this.location,
       phone: phone ?? this.phone,

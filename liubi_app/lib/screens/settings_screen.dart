@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../providers/user_provider.dart';
 import '../widgets/app_toast.dart';
 import '../services/update_service.dart';
+import '../services/api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -174,36 +175,170 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showChangePassword() {
-    final oldCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
     final newCtrl = TextEditingController();
     final confirmCtrl = TextEditingController();
+    bool codeSent = false;
+    int countdown = 0;
+    bool sendingCode = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => StatefulBuilder(builder: (ctx, ms) {
         return Container(
-          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 36, height: 4, margin: const EdgeInsets.only(top: 8), decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
-            Padding(padding: const EdgeInsets.all(16), child: const Text('修改密码', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF222222)))),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Container(decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: TextField(controller: oldCtrl, obscureText: true, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '当前密码', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12))))),
-            const SizedBox(height: 10),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Container(decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: TextField(controller: newCtrl, obscureText: true, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '新密码', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12))))),
-            const SizedBox(height: 10),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Container(decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)), child: TextField(controller: confirmCtrl, obscureText: true, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '确认新密码', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12))))),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Row(children: [
+                Container(width: 36, height: 36, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B81)]), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.lock_reset, color: Colors.white, size: 20)),
+                const SizedBox(width: 10),
+                const Text('修改密码', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx),
+                  child: Container(width: 28, height: 28, decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
+                ),
+              ]),
+            ),
             const SizedBox(height: 20),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: GestureDetector(onTap: () async {
-              if (newCtrl.text.trim() != confirmCtrl.text.trim()) { AppToast.error(ctx, message: '两次密码不一致'); return; }
-              final res = await Provider.of<UserProvider>(context, listen: false).changePassword(email: '', code: oldCtrl.text.trim(), newPassword: newCtrl.text.trim());
-              if (ctx.mounted) { Navigator.pop(ctx); if (res['code'] == 200) AppToast.success(context, message: '密码修改成功'); }
-            }, child: Container(width: double.infinity, height: 44, decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF5A6E)]), borderRadius: BorderRadius.circular(22)), alignment: Alignment.center, child: const Text('确定', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.w600))))),
-            const SizedBox(height: 30),
+            // 邮箱输入
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFEEEEEE))),
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  const Icon(Icons.email_outlined, size: 20, color: Color(0xFF999999)),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '请输入注册邮箱', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 12)))),
+                  GestureDetector(
+                    onTap: (countdown > 0 || sendingCode) ? null : () async {
+                      if (emailCtrl.text.trim().isEmpty) { AppToast.error(ctx, message: '请输入邮箱'); return; }
+                      ms(() { sendingCode = true; });
+                      try {
+                        final res = await ApiService().post('/users/send-reset-code', data: {'email': emailCtrl.text.trim()});
+                        if (ctx.mounted) {
+                          if (res['code'] == 200) {
+                            AppToast.success(ctx, message: '验证码已发送');
+                            ms(() { codeSent = true; countdown = 60; sendingCode = false; });
+                            _startCountdown(() => ms(() { countdown--; if (countdown <= 0) countdown = 0; }), countdown);
+                          } else {
+                            ms(() { sendingCode = false; });
+                            AppToast.error(ctx, message: res['msg'] ?? '发送失败');
+                          }
+                        }
+                      } catch (_) {
+                        if (ctx.mounted) ms(() { sendingCode = false; });
+                      }
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: (countdown > 0 || sendingCode) ? null : const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B81)]),
+                        color: (countdown > 0 || sendingCode) ? const Color(0xFFEEEEEE) : null,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: sendingCode
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF999999)))
+                          : Text(countdown > 0 ? '${countdown}s' : '获取验证码', style: TextStyle(fontSize: 12, color: countdown > 0 ? const Color(0xFF999999) : Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 验证码输入
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFEEEEEE))),
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  const Icon(Icons.verified_user_outlined, size: 20, color: Color(0xFF999999)),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: codeCtrl, keyboardType: TextInputType.number, maxLength: 6, style: const TextStyle(fontSize: 14, letterSpacing: 4), decoration: const InputDecoration(hintText: '6位验证码', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB), letterSpacing: 0), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 12), counterText: ''))),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 新密码
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFEEEEEE))),
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  const Icon(Icons.lock_outline, size: 20, color: Color(0xFF999999)),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: newCtrl, obscureText: true, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '新密码（至少6位）', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 12)))),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 确认新密码
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFEEEEEE))),
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  const Icon(Icons.lock_outline, size: 20, color: Color(0xFF999999)),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: confirmCtrl, obscureText: true, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(hintText: '确认新密码', hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 12)))),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: GestureDetector(
+                onTap: () async {
+                  if (emailCtrl.text.trim().isEmpty) { AppToast.error(ctx, message: '请输入邮箱'); return; }
+                  if (codeCtrl.text.trim().isEmpty) { AppToast.error(ctx, message: '请输入验证码'); return; }
+                  if (newCtrl.text.trim().length < 6) { AppToast.error(ctx, message: '密码至少6位'); return; }
+                  if (newCtrl.text.trim() != confirmCtrl.text.trim()) { AppToast.error(ctx, message: '两次密码不一致'); return; }
+                  final res = await ApiService().post('/users/reset-password', data: {
+                    'email': emailCtrl.text.trim(),
+                    'code': codeCtrl.text.trim(),
+                    'new_password': newCtrl.text.trim(),
+                  });
+                  if (ctx.mounted) {
+                    Navigator.pop(ctx);
+                    if (res['code'] == 200) {
+                      AppToast.success(context, message: '密码修改成功');
+                    } else {
+                      AppToast.error(context, message: res['msg'] ?? '修改失败');
+                    }
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  height: 48,
+                  decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B81)]), borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: const Color(0xFFFF2442).withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))]),
+                  alignment: Alignment.center,
+                  child: const Text('确认修改', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
           ]),
         );
       }),
     );
+  }
+
+  void _startCountdown(Function updater, int seconds) {
+    Future.delayed(const Duration(seconds: 1), () {
+      if (seconds > 1) {
+        _startCountdown(updater, seconds - 1);
+      }
+    });
   }
 
   @override
@@ -239,12 +374,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Consumer<UserProvider>(
                     builder: (_, up, __) {
                       if (up.userInfo?.role != 1) return const SizedBox.shrink();
-                      return Column(children: [
-                        const SizedBox(height: 10),
-                        _buildGroup([
-                          _buildItem(Icons.admin_panel_settings_outlined, '管理中心', trailing: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFFF2442), borderRadius: BorderRadius.circular(4)), child: const Text('Admin', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w600))), onTap: () => Navigator.pushNamed(context, '/admin')),
-                        ]),
-                      ]);
+                      return const SizedBox.shrink();
                     },
                   ),
                   const SizedBox(height: 10),
