@@ -240,12 +240,8 @@ class _AppRootState extends State<_AppRoot> {
       if (mounted) {
         NotificationService.requestPermission();
         ChatService().initLifecycle();
-        // 延迟2秒检查更新，确保widget树完全构建
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            UpdateService.checkUpdate(context, silent: true);
-          }
-        });
+        // 首帧渲染后立即检查更新
+        UpdateService.checkUpdate(context, silent: true);
       }
     });
   }
