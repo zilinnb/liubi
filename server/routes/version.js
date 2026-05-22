@@ -87,6 +87,9 @@ router.post('/', adminAuth, async (req, res) => {
 			'INSERT INTO app_versions (version_code, version_name, platform, update_type, force_update, download_url, update_content, package_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
 			[version_code, version_name, platform || 'android', update_type || 1, force_update || 0, download_url, update_content || '', package_size || '']
 		)
+		// 清除版本缓存，确保新版本立即可用
+		await redis.del('version:latest:android')
+		await redis.del('version:latest:ios')
 		res.json({ code: 200, msg: '版本发布成功', data: { id: result.insertId } })
 	} catch (e) {
 		console.error(e)
@@ -101,6 +104,9 @@ router.put('/:id', adminAuth, async (req, res) => {
 			'UPDATE app_versions SET version_code=?, version_name=?, platform=?, update_type=?, force_update=?, download_url=?, update_content=?, package_size=?, status=? WHERE id=?',
 			[version_code, version_name, platform, update_type, force_update, download_url, update_content, package_size, status, req.params.id]
 		)
+		// 清除版本缓存，确保修改立即可用
+		await redis.del('version:latest:android')
+		await redis.del('version:latest:ios')
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -110,6 +116,9 @@ router.put('/:id', adminAuth, async (req, res) => {
 router.delete('/:id', adminAuth, async (req, res) => {
 	try {
 		await db.query('DELETE FROM app_versions WHERE id = ?', [req.params.id])
+		// 清除版本缓存
+		await redis.del('version:latest:android')
+		await redis.del('version:latest:ios')
 		res.json({ code: 200, msg: '删除成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
