@@ -55,12 +55,14 @@ class UpdateService {
       debugPrint('UpdateService: hasUpdate=$hasUpdate');
 
       if (!hasUpdate) {
+        // silent模式下不弹"已是最新版本"
         if (!silent && context.mounted) {
           _showNoUpdate(context);
         }
         return;
       }
 
+      // 有更新时，无论silent与否都弹窗
       if (context.mounted) {
         _showUpdateDialog(context, data);
       }

@@ -9,11 +9,11 @@ router.get('/check', async (req, res) => {
 		const platform = req.query.platform || 'android'
 		const currentCode = parseInt(req.query.versionCode) || 0
 
-		// 尝试从缓存获取
+		// 尝试从缓存获取（redis.js的set/get已内置JSON序列化，无需再JSON.stringify）
 		const cacheKey = `version:latest:${platform}`
 		let cached = await redis.get(cacheKey)
 		if (cached) {
-			const latest = JSON.parse(cached)
+			const latest = cached
 			if (latest.version_code <= currentCode) {
 				return res.json({ code: 200, data: { hasUpdate: false } })
 			}
@@ -42,8 +42,8 @@ router.get('/check', async (req, res) => {
 		}
 
 		const latest = rows[0]
-		// 缓存5分钟
-		await redis.set(cacheKey, JSON.stringify(latest), 300)
+		// 缓存5分钟（redis.js的set已内置JSON.stringify，直接传对象）
+		await redis.set(cacheKey, latest, 300)
 
 		if (latest.version_code <= currentCode) {
 			return res.json({ code: 200, data: { hasUpdate: false } })
