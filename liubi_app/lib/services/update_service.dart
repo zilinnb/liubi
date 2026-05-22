@@ -5,39 +5,54 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:dio/dio.dart';
-import '../services/api_service.dart';
 
 class UpdateService {
+  // 直接使用Dio，不走ApiService拦截器，避免401清除token等问题
+  static final Dio _dio = Dio(BaseOptions(
+    baseUrl: 'https://liu.bi/api',
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 20),
+    headers: {'Content-Type': 'application/json'},
+  ));
+
   static Future<void> checkUpdate(BuildContext context, {bool silent = false}) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
-      // buildNumber 可能为空，尝试从 version 解析
       String buildNumber = packageInfo.buildNumber;
       if (buildNumber.isEmpty) {
-        // 从 version (如 "1.2.3") 解析，如果没有 buildNumber 则使用 0
         buildNumber = '0';
       }
       final currentCode = int.tryParse(buildNumber) ?? 0;
+      final platform = Platform.isAndroid ? 'android' : 'ios';
 
-      final res = await ApiService().get('/version/check', queryParameters: {
-        'platform': Platform.isAndroid ? 'android' : 'ios',
+      debugPrint('UpdateService: checking update, currentCode=$currentCode, platform=$platform');
+
+      final response = await _dio.get('/version/check', queryParameters: {
+        'platform': platform,
         'versionCode': '$currentCode',
       });
 
+      debugPrint('UpdateService: response status=${response.statusCode}, data=${response.data}');
+
+      final res = response.data as Map<String, dynamic>;
+
       if (res['code'] != 200) {
+        debugPrint('UpdateService: API returned code=${res['code']}, msg=${res['msg']}');
         if (!silent && context.mounted) {
-          _showNoUpdate(context);
+          _showCheckFailed(context, '服务器返回异常');
         }
         return;
       }
       final data = res['data'] as Map<String, dynamic>?;
       if (data == null) {
+        debugPrint('UpdateService: data is null');
         if (!silent && context.mounted) {
           _showNoUpdate(context);
         }
         return;
       }
       final hasUpdate = data['hasUpdate'] as bool? ?? false;
+      debugPrint('UpdateService: hasUpdate=$hasUpdate');
 
       if (!hasUpdate) {
         if (!silent && context.mounted) {
@@ -49,15 +64,28 @@ class UpdateService {
       if (context.mounted) {
         _showUpdateDialog(context, data);
       }
-    } catch (e) {
-      debugPrint('Update check error: $e');
+    } on DioException catch (e) {
+      debugPrint('UpdateService: DioException type=${e.type}, message=${e.message}');
       if (!silent && context.mounted) {
-        _showNoUpdate(context);
+        _showCheckFailed(context, '网络连接失败，请检查网络');
+      }
+    } catch (e) {
+      debugPrint('UpdateService: error=$e');
+      if (!silent && context.mounted) {
+        _showCheckFailed(context, '检查更新失败');
       }
     }
   }
 
   static void _showNoUpdate(BuildContext context) {
+    _showSimpleDialog(context, icon: Icons.check_circle, iconColor: const Color(0xFF52C41A), iconBg: const Color(0xFFF0FFF0), title: '已是最新版本');
+  }
+
+  static void _showCheckFailed(BuildContext context, String msg) {
+    _showSimpleDialog(context, icon: Icons.error_outline, iconColor: const Color(0xFFFF2442), iconBg: const Color(0xFFFFF5F5), title: msg);
+  }
+
+  static void _showSimpleDialog(BuildContext context, {required IconData icon, required Color iconColor, required Color iconBg, required String title}) {
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -75,9 +103,9 @@ class UpdateService {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(width: 56, height: 56, decoration: const BoxDecoration(color: Color(0xFFF0FFF0), shape: BoxShape.circle), child: const Icon(Icons.check_circle, color: Color(0xFF52C41A), size: 32)),
+                Container(width: 56, height: 56, decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle), child: Icon(icon, color: iconColor, size: 32)),
                 const SizedBox(height: 12),
-                const Text('已是最新版本', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
+                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
                 const SizedBox(height: 20),
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
