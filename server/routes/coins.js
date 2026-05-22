@@ -30,8 +30,8 @@ router.get('/balance', auth, async (req, res) => {
 		const [rows] = await db.query('SELECT balance, total_earned, total_spent, checkin_days, last_checkin FROM user_coins WHERE user_id = ?', [req.user.id])
 		const data = { ...rows[0] }
 		if (data.last_checkin instanceof Date) {
-			const d = data.last_checkin
-			data.last_checkin = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+			const d = new Date(data.last_checkin.getTime() + 8 * 3600000)
+			data.last_checkin = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
 		}
 		res.json({ code: 200, data })
 	} catch (e) {
@@ -44,15 +44,16 @@ router.post('/checkin', auth, async (req, res) => {
 	try {
 		await ensureUserRecords(req.user.id)
 		const [rows] = await db.query('SELECT last_checkin, checkin_days FROM user_coins WHERE user_id = ?', [req.user.id])
-		const now = new Date()
-		const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+		// 使用中国时区(UTC+8)判断日期
+		const now = new Date(Date.now() + 8 * 3600000)
+		const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 		const lastCheckin = rows[0].last_checkin ? String(rows[0].last_checkin).slice(0, 10) : null
 		if (lastCheckin === today) {
 			return res.json({ code: 400, msg: '今日已签到' })
 		}
 		// 连续签到判断
-		const yesterdayDate = new Date(Date.now() - 86400000)
-		const yesterday = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth()+1).padStart(2,'0')}-${String(yesterdayDate.getDate()).padStart(2,'0')}`
+		const yesterdayDate = new Date(Date.now() + 8 * 3600000 - 86400000)
+		const yesterday = `${yesterdayDate.getUTCFullYear()}-${String(yesterdayDate.getUTCMonth()+1).padStart(2,'0')}-${String(yesterdayDate.getUTCDate()).padStart(2,'0')}`
 		const isConsecutive = lastCheckin === yesterday
 		const newDays = isConsecutive ? rows[0].checkin_days + 1 : 1
 		// 连续签到奖励递增：从数据库读取配置

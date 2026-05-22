@@ -275,7 +275,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                 : NestedScrollView(
                     headerSliverBuilder: (ctx, _) => [
                       SliverAppBar(
-                        expandedHeight: statusBarH + 215,
+                        expandedHeight: statusBarH + 175,
                         pinned: true,
                         floating: false,
                         snap: false,
@@ -395,7 +395,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final curH = constraints.biggest.height;
-      final totalExpand = statusBarH + 215.0;
+      final totalExpand = statusBarH + 175.0;
       final cp =
           (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0))
               .clamp(0.0, 1.0);
@@ -597,17 +597,15 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                     ],
                   ),
                   if (bio.isNotEmpty) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     _buildExpandableBio(bio),
                   ] else ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     const Text('这个用户很懒，没有设置签名...', style: TextStyle(fontSize: 13, color: Colors.white60)),
                   ],
-                  if (location.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text('IP属地: $location', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-                  ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 6),
+                  Text('IP属地: ${location.isEmpty ? "未知" : location}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
+                  const SizedBox(height: 8),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -629,7 +627,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                               },
                               child: _bgStatItem(fmtNum(followCount), '关注'),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             GestureDetector(
                               onTap: () {
                                 if (_user?['can_see_fans'] == false) {
@@ -645,14 +643,16 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                               },
                               child: _bgStatItem(fmtNum(fansCount), '粉丝'),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             GestureDetector(
                               onTap: _showLikeCollectDetail,
                               child: _bgStatItem(
                                   fmtNum(likeCount), '获赞与收藏'),
                             ),
-                            const SizedBox(width: 24),
-                            _bgStatItem(fmtNum(coins), '留币'),
+                            if (isSelf) ...[
+                              const SizedBox(width: 16),
+                              _bgStatItem(fmtNum(coins), '留币'),
+                            ],
                           ],
                         ),
                       ),
@@ -697,7 +697,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                       ],
                     ],
                   ),
-                  _buildExpProgressBar(levelInfo),
+                  if (isSelf) _buildExpProgressBar(levelInfo),
                 ],
               ),
             ),
@@ -736,7 +736,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       children: [
         Text(count,
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: 14,
               fontWeight: FontWeight.w800,
               color: Colors.white,
               shadows: [Shadow(color: Colors.black26, blurRadius: 4)],
@@ -744,7 +744,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
         const SizedBox(height: 1),
         Text(label,
             style: const TextStyle(
-                fontSize: 11, color: Colors.white70)),
+                fontSize: 10, color: Colors.white70)),
       ],
     );
   }
@@ -760,31 +760,42 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     if (levelInfo == null) return const SizedBox.shrink();
     final levelColor = _getLevelColor(levelInfo.level);
     final isMaxLevel = levelInfo.nextLevelExp <= 0 || levelInfo.progress >= 1.0;
+    final needExp = isMaxLevel ? 0 : (levelInfo.nextLevelExp - levelInfo.exp);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
           children: [
-            Text(
-              isMaxLevel ? '已满级' : 'Lv.${levelInfo.level} → Lv.${levelInfo.level + 1}  ${levelInfo.currentExp}/${levelInfo.nextLevelExp - levelInfo.exp + levelInfo.currentExp}',
-              style: const TextStyle(fontSize: 10, color: Colors.white70),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: levelColor.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                'Lv.${levelInfo.level}',
+                style: TextStyle(fontSize: 9, color: levelColor, fontWeight: FontWeight.w700),
+              ),
             ),
+            const SizedBox(width: 6),
+            if (isMaxLevel)
+              const Text('已满级', style: TextStyle(fontSize: 10, color: Colors.white70))
+            else
+              Text('升级还需 $needExp 经验', style: const TextStyle(fontSize: 10, color: Colors.white70)),
             const Spacer(),
-            Text(
-              isMaxLevel ? '' : '还需${(levelInfo.nextLevelExp - levelInfo.exp)}经验',
-              style: const TextStyle(fontSize: 9, color: Colors.white54),
-            ),
+            if (!isMaxLevel)
+              Text('${(levelInfo.progress * 100).toStringAsFixed(0)}%', style: TextStyle(fontSize: 10, color: levelColor, fontWeight: FontWeight.w600)),
           ],
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 4),
         ClipRRect(
           borderRadius: BorderRadius.circular(2),
           child: LinearProgressIndicator(
             value: isMaxLevel ? 1.0 : levelInfo.progress.clamp(0.0, 1.0),
             backgroundColor: Colors.white24,
             valueColor: AlwaysStoppedAnimation<Color>(levelColor),
-            minHeight: 4,
+            minHeight: 3,
           ),
         ),
       ],

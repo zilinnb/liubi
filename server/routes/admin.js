@@ -1,18 +1,24 @@
 const express = require('express')
 const db = require('../config/db')
+const redis = require('../config/redis')
 const { adminAuth } = require('../middleware/auth')
 const router = express.Router()
 
 router.use(adminAuth)
 
-// 统计数据
+// 统计数据 - 缓存30秒
 router.get('/stats', async (req, res) => {
 	try {
+		const cached = await redis.get('admin:stats')
+		if (cached) return res.json({ code: 200, data: cached })
+
 		const [users] = await db.query('SELECT COUNT(*) as count FROM users')
 		const [posts] = await db.query('SELECT COUNT(*) as count FROM posts')
 		const [comments] = await db.query('SELECT COUNT(*) as count FROM comments')
 		const [pending] = await db.query('SELECT COUNT(*) as count FROM posts WHERE status = 2')
-		res.json({ code: 200, data: { users: users[0].count, posts: posts[0].count, comments: comments[0].count, pending: pending[0].count } })
+		const data = { users: users[0].count, posts: posts[0].count, comments: comments[0].count, pending: pending[0].count }
+		await redis.set('admin:stats', data, 30)
+		res.json({ code: 200, data })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
 	}
@@ -148,9 +154,9 @@ router.get('/categories', async (req, res) => {
 
 router.post('/categories', async (req, res) => {
 	try {
-		const { name, icon, cover, description, color, sort_order, publish_restriction } = req.body
+		const { name, icon, cover, description, color, sort_order, publish_restriction, min_level } = req.body
 		if (!name) return res.json({ code: 400, msg: '分类名必填' })
-		await db.query('INSERT INTO categories (name, icon, cover, description, color, sort_order, publish_restriction) VALUES (?, ?, ?, ?, ?, ?, ?)', [name, icon || '', cover || '', description || '', color || '', sort_order || 0, publish_restriction || 0])
+		await db.query('INSERT INTO categories (name, icon, cover, description, color, sort_order, publish_restriction, min_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [name, icon || '', cover || '', description || '', color || '', sort_order || 0, publish_restriction || 0, min_level || 0])
 		res.json({ code: 200, msg: '添加成功' })
 	} catch (e) {
 		if (e.code === 'ER_DUP_ENTRY') return res.json({ code: 400, msg: '分类名已存在' })
@@ -160,8 +166,8 @@ router.post('/categories', async (req, res) => {
 
 router.put('/categories/:id', async (req, res) => {
 	try {
-		const { name, icon, cover, description, color, sort_order, status, publish_restriction } = req.body
-		await db.query('UPDATE categories SET name=?, icon=?, cover=?, description=?, color=?, sort_order=?, status=?, publish_restriction=? WHERE id=?', [name, icon, cover || '', description || '', color || '', sort_order, status, publish_restriction || 0, req.params.id])
+		const { name, icon, cover, description, color, sort_order, status, publish_restriction, min_level } = req.body
+		await db.query('UPDATE categories SET name=?, icon=?, cover=?, description=?, color=?, sort_order=?, status=?, publish_restriction=?, min_level=? WHERE id=?', [name, icon, cover || '', description || '', color || '', sort_order, status, publish_restriction || 0, min_level || 0, req.params.id])
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })

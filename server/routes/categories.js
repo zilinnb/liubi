@@ -1,12 +1,18 @@
 const express = require('express')
 const db = require('../config/db')
+const redis = require('../config/redis')
 const { auth } = require('../middleware/auth')
 const router = express.Router()
 
-// 获取所有分类（含统计数据）
+// 获取所有分类（含统计数据）- 缓存60秒
 router.get('/', async (req, res) => {
 	try {
+		const cacheKey = 'categories:all'
+		const cached = await redis.get(cacheKey)
+		if (cached) return res.json({ code: 200, data: cached })
+
 		const [rows] = await db.query('SELECT * FROM categories WHERE status = 1 ORDER BY sort_order ASC')
+		await redis.set(cacheKey, rows, 60)
 		res.json({ code: 200, data: rows })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })

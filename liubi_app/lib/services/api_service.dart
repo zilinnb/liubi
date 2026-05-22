@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'storage_service.dart';
 
 class ApiService {
-  static const String BASE_URL = 'http://36.140.128.103:3000/api';
+  static const String BASE_URL = 'https://liu.bi/api';
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;

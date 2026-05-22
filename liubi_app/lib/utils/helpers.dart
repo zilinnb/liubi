@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-const String _baseUrl = 'http://36.140.128.103:3000';
+const String _baseUrl = 'https://liu.bi';
 
 String fullUrl(String? url) {
   if (url == null || url.isEmpty) return '';

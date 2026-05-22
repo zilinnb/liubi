@@ -24,8 +24,10 @@ import '../utils/emoji_assets.dart';
 import '../widgets/emoji_picker_panel.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/level_badge.dart';
+import '../services/api_service.dart';
 import 'package:extended_text_field/extended_text_field.dart';
 import 'image_viewer_screen.dart';
+import 'in_app_browser_screen.dart';
 
 final _urlRegex = RegExp(r'https?://[^\s\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+');
 
@@ -1190,6 +1192,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                 if (_post!.postType != 1) SliverToBoxAdapter(child: _title()),
                 SliverToBoxAdapter(child: _content()),
                 if (_post!.postType != 1) SliverToBoxAdapter(child: _tagRow()),
+                if (_post!.redpacket != null) SliverToBoxAdapter(child: _redpacketCard()),
                 SliverToBoxAdapter(child: _dateRow()),
                 if (_appreciations.isNotEmpty) SliverToBoxAdapter(child: _appreciationSection()),
                 SliverToBoxAdapter(child: Container(height: 8, color: const Color(0xFFF5F5F5))),
@@ -1362,7 +1365,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   Widget _innerLinkCard(String url, Color textColor) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/browser', arguments: {'url': url}),
+      onTap: () {
+        Navigator.push(context, CupertinoPageRoute(
+          builder: (_) => InAppBrowserScreen(url: url),
+        ));
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
@@ -1730,7 +1737,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
 
   Widget _linkBoxWidget(String url) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/browser', arguments: {'url': url}),
+      onTap: () {
+        Navigator.push(context, CupertinoPageRoute(
+          builder: (_) => InAppBrowserScreen(url: url),
+        ));
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(color: const Color(0xFFF5F7FA), borderRadius: BorderRadius.circular(6), border: Border.all(color: const Color(0xFFE8ECF0), width: 0.5)),
@@ -1752,26 +1763,9 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   Widget _buildLinkableText(String text, {TextStyle? style, TextAlign? textAlign}) {
     final urlMatches = _urlRegex.allMatches(text).toList();
     final emojiMatches = _emojiRegexp.allMatches(text).toList();
-    final contextMenuBuilder = (_, EditableTextState editableTextState) {
-      final List<ContextMenuButtonItem> items = editableTextState.contextMenuButtonItems.map((item) {
-        if (item.type == ContextMenuButtonType.copy) {
-          final origOnPressed = item.onPressed;
-          return ContextMenuButtonItem(
-            type: item.type,
-            label: item.label,
-            onPressed: () {
-              origOnPressed?.call();
-              AppToast.success(context, message: '已复制');
-            },
-          );
-        }
-        return item;
-      }).toList();
-      return AdaptiveTextSelectionToolbar.buttonItems(buttonItems: items, anchors: editableTextState.contextMenuAnchors);
-    };
 
     if (urlMatches.isEmpty && emojiMatches.isEmpty) {
-      return SelectableText(text, style: style, textAlign: textAlign, contextMenuBuilder: contextMenuBuilder);
+      return SelectableText(text, style: style, textAlign: textAlign);
     }
 
     final allMatches = <_TextMatch>[];
@@ -1794,7 +1788,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         spans.add(TextSpan(
           text: m.value,
           style: style?.copyWith(color: const Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: const Color(0xFFFF2442)) ?? const TextStyle(color: Color(0xFFFF2442), decoration: TextDecoration.underline, decorationColor: Color(0xFFFF2442)),
-          recognizer: TapGestureRecognizer()..onTap = () => Navigator.pushNamed(context, '/browser', arguments: {'url': m.value}),
+          recognizer: TapGestureRecognizer()..onTap = () => Navigator.push(context, CupertinoPageRoute(builder: (_) => InAppBrowserScreen(url: m.value))),
         ));
       } else {
         final assetPath = 'assets/emojis/${m.value}';
@@ -1827,7 +1821,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     return SelectableText.rich(
       TextSpan(children: spans, style: style),
       textAlign: textAlign,
-      contextMenuBuilder: contextMenuBuilder,
     );
   }
 
@@ -1839,6 +1832,82 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         child: Text('# ${_post!.categoryName}', style: const TextStyle(fontSize: 12, color: Color(0xFF3378E5), fontWeight: FontWeight.w500)),
       ),
     ]));
+  }
+
+  Widget _redpacketCard() {
+    if (_post?.redpacket == null) return const SizedBox.shrink();
+    final rp = _post!.redpacket!;
+    final totalCoins = rp['total_coins'] ?? 0;
+    final totalCount = rp['total_count'] ?? 1;
+    final remaining = rp['remaining_count'] ?? 0;
+    final message = rp['message'] ?? '恭喜发财';
+    final isGrabbed = remaining == 0;
+
+    return GestureDetector(
+      onTap: isGrabbed ? null : _grabRedpacket,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: isGrabbed
+              ? const LinearGradient(colors: [Color(0xFFE0E0E0), Color(0xFFD0D0D0)])
+              : const LinearGradient(colors: [Color(0xFFFF2442), Color(0xFFFF6B6B)]),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.card_giftcard, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(message, style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 3),
+                  Text(
+                    isGrabbed ? '红包已被抢完' : '剩余 $remaining/$totalCount 份',
+                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85)),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('$totalCoins', style: const TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.w700)),
+                const Text('留币', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _grabRedpacket() async {
+    if (_post?.redpacket == null) return;
+    final rpId = _post!.redpacket!['id'];
+    try {
+      final res = await ApiService().post('/coins/redpacket/grab', data: {'redpacket_id': rpId});
+      if (!mounted) return;
+      if (res['code'] == 200) {
+        final coins = res['data']?['amount'] ?? 0;
+        AppToast.success(context, message: '抢到 $coins 留币！');
+        _loadData();
+      } else {
+        AppToast.info(context, message: res['msg'] ?? '手慢了');
+      }
+    } catch (_) {
+      if (mounted) AppToast.error(context, message: '抢红包失败');
+    }
   }
 
   Widget _dateRow() {

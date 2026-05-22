@@ -1,5 +1,6 @@
 const express = require('express')
 const db = require('../config/db')
+const redis = require('../config/redis')
 const { auth } = require('../middleware/auth')
 const { getIpLocation, getClientIp } = require('../utils/ip-location')
 const { addExp } = require('./coins')
@@ -42,11 +43,19 @@ async function processMentions(fromUserId, text, targetId, targetType) {
 	}
 }
 
-// 获取帖子列表
+// 获取帖子列表 - 缓存30秒
 router.get('/', async (req, res) => {
 	try {
 		const { category_id, page = 1, pageSize = 20, user_id, following, sort } = req.query
 		const offset = (page - 1) * pageSize
+
+		// 非个性化请求才缓存（无following、无user_id）
+		const canCache = !following && !user_id
+		const cacheKey = canCache ? `posts:list:${category_id || 'all'}:${page}:${pageSize}:${sort || 'latest'}` : null
+		if (cacheKey) {
+			const cached = await redis.get(cacheKey)
+			if (cached) return res.json({ code: 200, data: cached })
+		}
 		let where = 'WHERE p.status = 1'
 		const params = []
 
@@ -160,7 +169,9 @@ router.get('/', async (req, res) => {
 			} catch {}
 		}
 
-		res.json({ code: 200, data: { list, total: countRows[0].total, page: Number(page), pageSize: Number(pageSize) } })
+		const result = { list, total: countRows[0].total, page: Number(page), pageSize: Number(pageSize) }
+		if (cacheKey) await redis.set(cacheKey, result, 30)
+		res.json({ code: 200, data: result })
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })
@@ -212,7 +223,16 @@ router.get('/search', async (req, res) => {
 			[`%${keyword}%`, `%${keyword}%`, `%${keyword}%`]
 		)
 
-		const list = rows.map(r => ({ ...r, images: imgMap[r.id] || [], isLiked: false, isCollected: false }))
+		// 批量查询作者等级
+		const authorIds = [...new Set(rows.map(r => r.user_id))]
+		const levelMap = {}
+		if (authorIds.length) {
+			const { getLevelInfo } = require('./level-config')
+			const [lvlRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [authorIds])
+			lvlRows.forEach(l => { levelMap[l.user_id] = getLevelInfo(l.exp || 0) })
+		}
+
+		const list = rows.map(r => ({ ...r, images: imgMap[r.id] || [], isLiked: false, isCollected: false, level_info: levelMap[r.user_id] || null }))
 		res.json({ code: 200, data: { list, total: countRows[0].total, page: Number(page), pageSize: Number(pageSize) } })
 	} catch (e) {
 		console.error(e)
@@ -220,11 +240,15 @@ router.get('/search', async (req, res) => {
 	}
 })
 
-// 热门榜单
+// 热门榜单 - 缓存120秒
 router.get('/trending', async (req, res) => {
 	try {
 		const { type = 'hot', limit = 30 } = req.query
 		const limitNum = Math.min(Number(limit) || 30, 100)
+
+		const cacheKey = `posts:trending:${type}:${limitNum}`
+		const cached = await redis.get(cacheKey)
+		if (cached) return res.json({ code: 200, data: cached })
 
 		let rows
 		if (type === 'hot') {
@@ -269,6 +293,16 @@ router.get('/trending', async (req, res) => {
 			post.images = imgs
 		}
 
+		// 批量查询作者等级
+		if (rows.length) {
+			const userIds = [...new Set(rows.map(r => r.user_id))]
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [userIds])
+			const levelMap = {}
+			levelRows.forEach(lr => { levelMap[lr.user_id] = getLevelInfo(lr.exp) })
+			rows.forEach(r => { r.level_info = levelMap[r.user_id] || null })
+		}
+
+		await redis.set(cacheKey, rows, 120)
 		res.json({ code: 200, data: rows })
 	} catch (e) {
 		console.error(e)
@@ -323,7 +357,15 @@ router.get('/:id', async (req, res) => {
 		const [authorLevelRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [postRow.user_id])
 		const authorLevelInfo = authorLevelRows.length ? getLevelInfo(authorLevelRows[0].exp) : null
 
-		const post = { ...rows[0], images, level_info: authorLevelInfo, isLiked: false, isCollected: false, is_followed: false, is_fan: false }
+		const post = { ...rows[0], images, level_info: authorLevelInfo, isLiked: false, isCollected: false, is_followed: false, is_fan: false, redpacket: null }
+
+		// 查询红包信息
+		if (post.redpacket_id) {
+			const [rpRows] = await db.query('SELECT id, total_coins, total_count, remaining_coins, remaining_count, message FROM coin_redpackets WHERE id = ?', [post.redpacket_id])
+			if (rpRows.length) {
+				post.redpacket = rpRows[0]
+			}
+		}
 
 		if (post.content_blocks && typeof post.content_blocks === 'string') {
 			try { post.content_blocks = JSON.parse(post.content_blocks) } catch (e) { post.content_blocks = null }
@@ -395,10 +437,17 @@ router.post('/', auth, async (req, res) => {
 		const clientIp = getClientIp(req)
 		const location = await getIpLocation(clientIp)
 
+		const redpacket_id = req.body.redpacket_id || null
+
 		const [result] = await db.query(
-			'INSERT INTO posts (user_id, title, content, content_blocks, category_id, location, topics, post_type, voice_url, voice_duration, text_template, link, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
-			[req.user.id, title, content || '', contentBlocks, category_id || null, location, topicsStr, post_type || 3, voice_url || '', voice_duration || 0, text_template || 0, link || '']
+			'INSERT INTO posts (user_id, title, content, content_blocks, category_id, location, topics, post_type, voice_url, voice_duration, text_template, link, redpacket_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
+			[req.user.id, title, content || '', contentBlocks, category_id || null, location, topicsStr, post_type || 3, voice_url || '', voice_duration || 0, text_template || 0, link || '', redpacket_id]
 		)
+
+		// 更新红包的post_id关联
+		if (redpacket_id) {
+			await db.query('UPDATE coin_redpackets SET post_id = ? WHERE id = ?', [result.insertId, redpacket_id])
+		}
 
 		if (images && images.length) {
 			const vals = images.map((img, i) => {
@@ -421,6 +470,8 @@ router.post('/', auth, async (req, res) => {
 
 		res.json({ code: 200, msg: '发布成功', data: { id: result.insertId } })
 		addExp(req.user.id, EXP_RULES.post).catch(() => {})
+		redis.del('posts:list:*').catch(() => {})
+		redis.del('categories:all').catch(() => {})
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })

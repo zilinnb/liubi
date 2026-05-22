@@ -19,7 +19,7 @@
 					<view class="cate-info">
 						<text class="cate-name">{{ c.name }}</text>
 						<text class="cate-sub">{{ c.description || '暂无介绍' }}</text>
-						<text class="cate-sub">排序：{{ c.sort_order }} · 帖子：{{ c.post_count || 0 }} · {{ c.status === 1 ? '启用' : '禁用' }}<text class="official-tag" v-if="c.publish_restriction === 1">官方</text></text>
+						<text class="cate-sub">排序：{{ c.sort_order }} · 帖子：{{ c.post_count || 0 }} · {{ c.status === 1 ? '启用' : '禁用' }}<text class="official-tag" v-if="c.publish_restriction === 1">官方</text><text class="level-tag" v-if="c.min_level > 0">Lv.{{ c.min_level }}</text></text>
 					</view>
 					<view class="cate-actions">
 						<view class="act-btn act-edit" @tap="editCategory(c)"><text class="act-text">编辑</text></view>
@@ -66,6 +66,13 @@
 						<view class="toggle-opt" :class="{ 'toggle-on': editForm.publish_restriction === 1 }" @tap="editForm.publish_restriction=1"><text class="toggle-text">仅管理员</text></view>
 					</view>
 				</view>
+				<view class="modal-field">
+					<text class="field-label">等级限制</text>
+					<view class="toggle-row" style="flex-wrap: wrap; gap: 8rpx;">
+						<view class="toggle-opt" :class="{ 'toggle-on': editForm.min_level === 0 }" @tap="editForm.min_level=0"><text class="toggle-text">无限制</text></view>
+						<view class="toggle-opt" :class="{ 'toggle-on': editForm.min_level === lv }" v-for="lv in [3,5,7,10]" :key="lv" @tap="editForm.min_level=lv"><text class="toggle-text">Lv.{{ lv }}</text></view>
+					</view>
+				</view>
 				<view class="modal-btns">
 					<view class="modal-btn modal-cancel" @tap="showModal=false"><text class="modal-btn-text">取消</text></view>
 					<view class="modal-btn modal-confirm" @tap="saveCategory"><text class="modal-btn-text-confirm">保存</text></view>
@@ -89,7 +96,7 @@ const newSort = ref('0')
 const newColor = ref('')
 const newDesc = ref('')
 const showModal = ref(false)
-const editForm = ref({ id: null, name: '', icon: '', color: '', description: '', cover: '', sort_order: 0, status: 1, publish_restriction: 0 })
+const editForm = ref({ id: null, name: '', icon: '', color: '', description: '', cover: '', sort_order: 0, status: 1, publish_restriction: 0, min_level: 0 })
 
 const COLORS = ['#ff2442','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2']
 function cateColor(id) { return COLORS[id % COLORS.length] }
@@ -111,7 +118,7 @@ async function addCategory() {
 }
 
 function editCategory(c) {
-	editForm.value = { id: c.id, name: c.name, icon: c.icon, color: c.color || '', description: c.description || '', cover: c.cover || '', sort_order: c.sort_order, status: c.status, publish_restriction: c.publish_restriction || 0 }
+	editForm.value = { id: c.id, name: c.name, icon: c.icon, color: c.color || '', description: c.description || '', cover: c.cover || '', sort_order: c.sort_order, status: c.status, publish_restriction: c.publish_restriction || 0, min_level: c.min_level || 0 }
 	showModal.value = true
 }
 
@@ -119,7 +126,7 @@ async function saveCategory() {
 	const f = editForm.value
 	const res = await request({ url: '/admin/categories/' + f.id, method: 'PUT', data: {
 		name: f.name, icon: f.icon, color: f.color, description: f.description, cover: f.cover,
-		sort_order: Number(f.sort_order) || 0, status: f.status, publish_restriction: f.publish_restriction
+		sort_order: Number(f.sort_order) || 0, status: f.status, publish_restriction: f.publish_restriction, min_level: Number(f.min_level) || 0
 	}})
 	if (res.code === 200) { showModal.value = false; loadData(); uni.showToast({ title: '保存成功', icon: 'none' }) }
 	else uni.showToast({ title: res.msg || '保存失败', icon: 'none' })
@@ -193,4 +200,5 @@ onMounted(() => loadData())
 .modal-confirm { background: #ff2442; }
 .modal-btn-text-confirm { font-size: 28rpx; color: #fff; font-weight: 600; }
 .official-tag { font-size: 20rpx; color: #ff2442; background: #fff0f0; padding: 2rpx 10rpx; border-radius: 6rpx; margin-left: 8rpx; font-weight: 600; }
+.level-tag { font-size: 20rpx; color: #722ed1; background: #f9f0ff; padding: 2rpx 10rpx; border-radius: 6rpx; margin-left: 8rpx; font-weight: 600; }
 </style>

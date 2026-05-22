@@ -423,7 +423,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                       const Divider(height: 1, indent: 14, endIndent: 14, color: Color(0xFFF5F5F5)),
                       ..._buildEditorItems(),
                       const SizedBox(height: 20),
-                      _buildAddMoreButton(),
+                      if (!_showEmojiPanel && _currentTextIndex < 0) _buildAddMoreButton(),
                     ],
                   ),
                 ),
@@ -453,35 +453,35 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
         GestureDetector(
           onTap: _canPublish && !_publishing ? _doPublish : null,
           child: Container(
-            width: 56,
+            width: 68,
             height: 44,
-            alignment: Alignment.center,
-            child: _publishing
-                ? SizedBox(width: 20, height: 20, child: CupertinoActivityIndicator(radius: 10, color: Color(0xFFFF2442)))
-                : Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (_hasRedpacket) ...[
-                      const Icon(Icons.card_giftcard, size: 12, color: Color(0xFFFF2442)),
-                      const SizedBox(width: 2),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Text(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: _canPublish ? const Color(0xFFFF2442) : const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: _publishing
+                  ? const SizedBox(width: 16, height: 16, child: CupertinoActivityIndicator(radius: 8, color: Colors.white))
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (_hasRedpacket) ...[
+                        const Icon(Icons.card_giftcard, size: 13, color: Colors.white),
+                        const SizedBox(width: 3),
+                      ],
+                      Text(
                         _editingPostId != null ? '保存' : '发布',
                         style: TextStyle(
                           fontSize: 13,
                           color: _canPublish ? Colors.white : const Color(0xFF999999),
-                          fontWeight: _canPublish ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-                  ]),
+                    ]),
+            ),
           ),
         ),
-        const SizedBox(width: 8),
       ]),
     );
   }
@@ -530,11 +530,42 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     final widgets = <Widget>[];
     for (int i = 0; i < _items.length; i++) {
       widgets.add(_buildEditorItem(i));
+      // 非文本项下方自动添加文本输入区域
+      if (_items[i].type != 'text') {
+        // 如果下一项不是文本，自动插入一个文本项
+        if (i == _items.length - 1 || _items[i + 1].type != 'text') {
+          widgets.add(_buildInlineTextAfter(i));
+        }
+      }
       if (i < _items.length - 1) {
         widgets.add(_buildInsertDivider(i + 1));
       }
     }
     return widgets;
+  }
+
+  Widget _buildInlineTextAfter(int afterIdx) {
+    // 在非文本项下方提供一个可点击的文本输入区域
+    return GestureDetector(
+      onTap: () {
+        // 在 afterIdx+1 位置插入文本项
+        _insertTextAt(afterIdx + 1);
+        // 自动聚焦新插入的文本框
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (afterIdx + 1 < _textFocusNodes.length) {
+            _textFocusNodes[afterIdx + 1].requestFocus();
+          }
+        });
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+        child: Text(
+          '点击输入文本...',
+          style: TextStyle(fontSize: 15, color: const Color(0xFFCCCCCC), height: 2.0),
+        ),
+      ),
+    );
   }
 
   Widget _buildEditorItem(int idx) {
@@ -1691,7 +1722,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                   return GestureDetector(
                     onTap: () {
                       if (isLocked) {
-                        AppToast.info(context, message: '等级>Lv.${cat.minLevel}才能选择此话题');
+                        AppToast.info(context, message: '需要到达Lv.${cat.minLevel}以后才能发布笔记');
                         return;
                       }
                       setState(() {
@@ -1791,6 +1822,21 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
 
   void _doPublish() async {
     if (_publishing) return;
+
+    // 发布前校验分类等级限制
+    if (_selectedCategoryId != null) {
+      final cats = Provider.of<PostProvider>(context, listen: false).categories;
+      final cat = cats.firstWhere(
+        (c) => c.id.toString() == _selectedCategoryId,
+        orElse: () => cats.first,
+      );
+      final userLevel = Provider.of<UserProvider>(context, listen: false).userInfo?.levelInfo?.level ?? 1;
+      if (cat.minLevel > 0 && userLevel < cat.minLevel) {
+        AppToast.info(context, message: '需要到达Lv.${cat.minLevel}以后才能发布笔记');
+        return;
+      }
+    }
+
     setState(() => _publishing = true);
 
     try {
@@ -1919,8 +1965,8 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
             totalCount: _redpacketCount,
             message: _redpacketMessage,
           );
-          if (rpRes['code'] == 200 && rpRes['data']?['id'] != null) {
-            _redpacketId = rpRes['data']['id'] as int;
+          if (rpRes['code'] == 200 && rpRes['data']?['redpacket_id'] != null) {
+            _redpacketId = rpRes['data']['redpacket_id'] as int;
             data['redpacket_id'] = _redpacketId;
           } else {
             if (mounted) AppToast.error(context, message: rpRes['msg'] ?? '红包发送失败');

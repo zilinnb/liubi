@@ -17,6 +17,6 @@ class AppColors {
 }
 
 class AppUrls {
-  static const String baseUrl = 'http://36.140.128.103:3000/api';
-  static const String staticUrl = 'http://36.140.128.103:3000';
+  static const String baseUrl = 'https://liu.bi/api';
+  static const String staticUrl = 'https://liu.bi';
 }

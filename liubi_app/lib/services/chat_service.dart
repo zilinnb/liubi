@@ -12,7 +12,7 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
   static final ChatService _instance = ChatService._internal();
   factory ChatService() => _instance;
 
-  static const String _wsUrl = 'ws://36.140.128.103:3000/ws';
+  static const String _wsUrl = 'wss://liu.bi/ws';
   static const Duration _heartbeatInterval = Duration(seconds: 30);
   static const Duration _reconnectDelay = Duration(seconds: 3);
   static const int _maxReconnectAttempts = 10;

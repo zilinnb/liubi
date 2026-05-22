@@ -122,6 +122,7 @@ class Post {
   final String avatar;
   final String createdAt;
   final int? redpacketId;
+  final Map<String, dynamic>? redpacket;
   final LevelInfo? levelInfo;
 
   Post({
@@ -156,6 +157,7 @@ class Post {
     this.avatar = '',
     this.createdAt = '',
     this.redpacketId,
+    this.redpacket,
     this.levelInfo,
   });
 
@@ -212,6 +214,7 @@ class Post {
       avatar: json['avatar'] ?? '',
       createdAt: json['created_at'] ?? '',
       redpacketId: json['redpacket_id'],
+      redpacket: json['redpacket'] != null ? Map<String, dynamic>.from(json['redpacket']) : null,
       levelInfo: json['level_info'] != null
           ? LevelInfo.fromJson(json['level_info'] as Map<String, dynamic>)
           : null,

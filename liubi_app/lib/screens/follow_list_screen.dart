@@ -100,6 +100,8 @@ class _FollowListScreenState extends State<FollowListScreen> {
     final isFollowed = user['is_followed'] as bool? ?? false;
     final isFan = user['is_fan'] as bool? ?? false;
     final avatarUrl = fullUrl(avatar);
+    final levelInfo = user['level_info'] as Map<String, dynamic>?;
+    final level = levelInfo?['level'] as int? ?? 1;
 
     return GestureDetector(
       onTap: () => Navigator.pushNamed(context, '/user-profile', arguments: userId),
@@ -116,7 +118,22 @@ class _FollowListScreenState extends State<FollowListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(nickname, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
+                  Row(
+  children: [
+    Flexible(child: Text(nickname, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF222222)), overflow: TextOverflow.ellipsis)),
+    if (level > 1) ...[
+      const SizedBox(width: 4),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        decoration: BoxDecoration(
+          color: _getLevelColor(level).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text('Lv.$level', style: TextStyle(fontSize: 9, color: _getLevelColor(level), fontWeight: FontWeight.w600)),
+      ),
+    ],
+  ],
+),
                   if (bio.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(bio, style: const TextStyle(fontSize: 12, color: Color(0xFF999999)), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -176,5 +193,12 @@ class _FollowListScreenState extends State<FollowListScreen> {
         ),
       ),
     );
+  }
+
+  Color _getLevelColor(int level) {
+    if (level <= 3) return const Color(0xFF999999);
+    if (level <= 6) return const Color(0xFF1890FF);
+    if (level <= 9) return const Color(0xFF722ED1);
+    return const Color(0xFFFAAD14);
   }
 }

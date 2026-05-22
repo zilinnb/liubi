@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken')
 const { PORT } = require('./config/env')
 const { JWT_SECRET } = require('./config/env')
 const db = require('./config/db')
+const redis = require('./config/redis')
 
 const app = express()
 const server = http.createServer(app)
@@ -707,6 +708,9 @@ app.use((req, res) => {
 // 启动
 async function start() {
 	await autoInit()
+	await redis.init()
+	// 补全已有用户的 user_levels 记录
+	try { await db.query('INSERT IGNORE INTO user_levels (user_id) SELECT id FROM users') } catch (e) {}
 	server.listen(PORT, () => {
 		console.log('')
 		console.log('  ╔══════════════════════════════════════╗')

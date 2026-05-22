@@ -176,7 +176,7 @@ class _MineScreenState extends State<MineScreen>
                 body: NestedScrollView(
                   headerSliverBuilder: (ctx, _) => [
                     SliverAppBar(
-                      expandedHeight: statusBarH + 215,
+                      expandedHeight: statusBarH + 210,
                       pinned: true,
                       floating: false,
                       snap: false,
@@ -360,7 +360,7 @@ class _MineScreenState extends State<MineScreen>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final curH = constraints.biggest.height;
-      final totalExpand = statusBarH + 215.0;
+      final totalExpand = statusBarH + 210.0;
       final cp =
           (1 - ((curH - 44) / (totalExpand - 44)).clamp(0.0, 1.0))
               .clamp(0.0, 1.0);
@@ -570,11 +570,10 @@ class _MineScreenState extends State<MineScreen>
                     const SizedBox(height: 12),
                     const Text('这个用户很懒，没有设置签名...', style: TextStyle(fontSize: 13, color: Colors.white60)),
                   ],
-                  if (location.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text('IP属地: $location', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-                  ],
                   const SizedBox(height: 12),
+                  Text('IP属地: ${location.isEmpty ? "未知" : location}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
+                  _buildExpProgressBar(levelInfo),
+                  const SizedBox(height: 8),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -590,7 +589,7 @@ class _MineScreenState extends State<MineScreen>
                                   }),
                               child: _bgStatItem(fmtNum(followCount), '关注'),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             GestureDetector(
                               onTap: () => Navigator.pushNamed(
                                   context, '/follow-list',
@@ -600,13 +599,13 @@ class _MineScreenState extends State<MineScreen>
                                   }),
                               child: _bgStatItem(fmtNum(fansCount), '粉丝'),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             GestureDetector(
                               onTap: _showLikeCollectDetail,
                               child: _bgStatItem(
                                   fmtNum(likeCount), '获赞与收藏'),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             GestureDetector(
                               onTap: () {
                                 Navigator.of(context).push(CupertinoPageRoute(builder: (_) => const CoinCenterScreen())).then((_) {
@@ -645,7 +644,6 @@ class _MineScreenState extends State<MineScreen>
                       ),
                     ],
                   ),
-                  _buildExpProgressBar(levelInfo),
                 ],
               ),
             ),
@@ -717,7 +715,7 @@ class _MineScreenState extends State<MineScreen>
       children: [
         Text(count,
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: 14,
               fontWeight: FontWeight.w800,
               color: Colors.white,
               shadows: [Shadow(color: Colors.black26, blurRadius: 4)],
@@ -725,7 +723,7 @@ class _MineScreenState extends State<MineScreen>
         const SizedBox(height: 1),
         Text(label,
             style: const TextStyle(
-                fontSize: 11, color: Colors.white70)),
+                fontSize: 10, color: Colors.white70)),
       ],
     );
   }
@@ -741,31 +739,44 @@ class _MineScreenState extends State<MineScreen>
     if (levelInfo == null) return const SizedBox.shrink();
     final levelColor = _getLevelColor(levelInfo.level);
     final isMaxLevel = levelInfo.nextLevelExp <= 0 || levelInfo.progress >= 1.0;
+    // currentExp: 当前等级内已获经验, nextLevelExp: 下一级所需总经验(0=满级)
+    // exp: 用户总经验
+    final needExp = isMaxLevel ? 0 : (levelInfo.nextLevelExp - levelInfo.exp);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
           children: [
-            Text(
-              isMaxLevel ? '已满级' : 'Lv.${levelInfo.level} → Lv.${levelInfo.level + 1}  ${levelInfo.currentExp}/${levelInfo.nextLevelExp - levelInfo.exp + levelInfo.currentExp}',
-              style: const TextStyle(fontSize: 10, color: Colors.white70),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: levelColor.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                'Lv.${levelInfo.level}',
+                style: TextStyle(fontSize: 9, color: levelColor, fontWeight: FontWeight.w700),
+              ),
             ),
+            const SizedBox(width: 6),
+            if (isMaxLevel)
+              const Text('已满级', style: TextStyle(fontSize: 10, color: Colors.white70))
+            else
+              Text('升级还需 $needExp 经验', style: const TextStyle(fontSize: 10, color: Colors.white70)),
             const Spacer(),
-            Text(
-              isMaxLevel ? '' : '还需${(levelInfo.nextLevelExp - levelInfo.exp)}经验',
-              style: const TextStyle(fontSize: 9, color: Colors.white54),
-            ),
+            if (!isMaxLevel)
+              Text('${(levelInfo.progress * 100).toStringAsFixed(0)}%', style: TextStyle(fontSize: 10, color: levelColor, fontWeight: FontWeight.w600)),
           ],
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 4),
         ClipRRect(
           borderRadius: BorderRadius.circular(2),
           child: LinearProgressIndicator(
             value: isMaxLevel ? 1.0 : levelInfo.progress.clamp(0.0, 1.0),
             backgroundColor: Colors.white24,
             valueColor: AlwaysStoppedAnimation<Color>(levelColor),
-            minHeight: 4,
+            minHeight: 3,
           ),
         ),
       ],

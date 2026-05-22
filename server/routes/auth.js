@@ -2,6 +2,7 @@ const express = require('express')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const db = require('../config/db')
+const redis = require('../config/redis')
 const { auth } = require('../middleware/auth')
 const { JWT_SECRET } = require('../config/env')
 const { sendVerifyCode } = require('../utils/mailer')
@@ -113,6 +114,9 @@ router.post('/register', async (req, res) => {
 				await db.query('INSERT IGNORE INTO chat_members (conversation_id, user_id) VALUES (?, ?)', [groups[0].id, result.insertId])
 			}
 		} catch (e) { console.error('自动加群失败:', e) }
+
+		// 初始化用户等级记录
+		try { await db.query('INSERT IGNORE INTO user_levels (user_id) VALUES (?)', [result.insertId]) } catch (e) {}
 
 		const token = jwt.sign({ id: result.insertId, username, role: 0 }, JWT_SECRET, { expiresIn: '7d' })
 		res.json({
@@ -296,9 +300,13 @@ router.post('/change-username', auth, async (req, res) => {
 	}
 })
 
-// 获取当前用户信息
+// 获取当前用户信息 - 缓存30秒
 router.get('/profile', auth, async (req, res) => {
 	try {
+		const cacheKey = `user:profile:${req.user.id}`
+		const cached = await redis.get(cacheKey)
+		if (cached) return res.json({ code: 200, data: cached })
+
 		const [rows] = await db.query(
 			'SELECT id,username,nickname,avatar,bg_image,email,bio,gender,birthday,location,role,fans_count,follow_count,like_count,collect_count,privacy_follows,privacy_fans,privacy_likes,privacy_activities,username_changed_at,created_at FROM users WHERE id = ?',
 			[req.user.id]
@@ -313,6 +321,7 @@ router.get('/profile', auth, async (req, res) => {
 		const [levelRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [req.user.id])
 		user.coins = coinRows[0]?.balance || 0
 		user.level_info = levelRows.length ? getLevelInfo(levelRows[0].exp) : null
+		await redis.set(cacheKey, user, 30)
 		res.json({ code: 200, data: user })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -347,6 +356,7 @@ router.get('/profile', auth, async (req, res) => {
 		if (!sets.length) return res.json({ code: 400, msg: '没有要更新的字段' })
 		vals.push(req.user.id)
 		await db.query('UPDATE users SET ' + sets.join(', ') + ' WHERE id = ?', vals)
+		await redis.del(`user:profile:${req.user.id}`)
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
 		console.error(e)

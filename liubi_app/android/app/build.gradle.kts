@@ -44,8 +44,8 @@ android {
         applicationId = "com.liubi.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 36
-        versionCode = 107
-        versionName = "Beta 0.0.8"
+        versionCode = 108
+        versionName = "Beta 0.0.9"
     }
 
     buildTypes {
@@ -53,10 +53,21 @@ android {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
+            isCrunchPngs = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    // ABI split，每个架构单独APK，体积更小
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 }

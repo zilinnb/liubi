@@ -294,7 +294,7 @@ class _AiImageScreenState extends State<AiImageScreen> with TickerProviderStateM
   String _getImageUrl(String? url) {
     if (url == null || url.isEmpty) return '';
     if (url.startsWith('http')) return url;
-    return 'http://36.140.128.103:3000$url';
+    return 'https://liu.bi$url';
   }
 
   void _previewImage(String url) {

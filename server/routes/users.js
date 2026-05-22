@@ -283,6 +283,15 @@ router.get('/:id/follows', auth, async (req, res) => {
 			const myFanSet2 = new Set(myFans2.map(f => f.follower_id))
 			rows.forEach(u => { u.is_fan = myFanSet2.has(u.id) })
 
+		// 批量查询用户等级
+		const followUserIds = rows.map(u => u.id)
+		let followLevelMap = {}
+		if (followUserIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [followUserIds])
+			levelRows.forEach(lr => { followLevelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+		rows.forEach(u => { u.level_info = followLevelMap[u.id] || null })
+
 		res.json({ code: 200, data: rows })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -319,6 +328,15 @@ router.get('/:id/fans', auth, async (req, res) => {
 		const [myFans2] = await db.query('SELECT follower_id FROM follows WHERE following_id = ?', [req.user.id])
 			const myFanSet2 = new Set(myFans2.map(f => f.follower_id))
 			rows.forEach(u => { u.is_fan = myFanSet2.has(u.id) })
+
+		// 批量查询用户等级
+		const fanUserIds = rows.map(u => u.id)
+		let fanLevelMap = {}
+		if (fanUserIds.length) {
+			const [levelRows] = await db.query('SELECT user_id, exp FROM user_levels WHERE user_id IN (?)', [fanUserIds])
+			levelRows.forEach(lr => { fanLevelMap[lr.user_id] = getLevelInfo(lr.exp) })
+		}
+		rows.forEach(u => { u.level_info = fanLevelMap[u.id] || null })
 
 		res.json({ code: 200, data: rows })
 	} catch (e) {

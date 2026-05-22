@@ -25,7 +25,8 @@ liubi_app/web/
 
 *.jks
 *.keystore
-deploy.py
+key.properties
+deploy*.py
 
 .idea/
 .vscode/

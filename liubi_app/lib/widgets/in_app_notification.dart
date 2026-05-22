@@ -205,7 +205,7 @@ class _NotificationBannerState extends State<_NotificationBanner>
         child: Image.network(
           widget.avatarUrl!.startsWith('http')
               ? widget.avatarUrl!
-              : 'http://36.140.128.103:3000${widget.avatarUrl!}',
+              : 'https://liu.bi${widget.avatarUrl!}',
           width: 40,
           height: 40,
           fit: BoxFit.cover,
