@@ -30,7 +30,10 @@ class ApiService {
       },
       onError: (error, handler) async {
         if (error.response?.statusCode == 401) {
-          await StorageService.clearAll();
+          // 版本检查接口不需要登录，401不应清除token
+          if (error.requestOptions.path != '/version/check') {
+            await StorageService.clearAll();
+          }
         }
         handler.next(error);
       },

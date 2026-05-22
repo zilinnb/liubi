@@ -5,89 +5,99 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:dio/dio.dart';
+import 'api_service.dart';
 
 class UpdateService {
-  // 直接使用Dio，不走ApiService拦截器，避免401清除token等问题
-  static final Dio _dio = Dio(BaseOptions(
-    baseUrl: 'https://liu.bi/api',
-    connectTimeout: const Duration(seconds: 20),
-    receiveTimeout: const Duration(seconds: 20),
-    headers: {'Content-Type': 'application/json'},
-  ));
-
   static Future<void> checkUpdate(BuildContext context, {bool silent = false}) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
+      final currentVersion = packageInfo.version;
       String buildNumber = packageInfo.buildNumber;
-      if (buildNumber.isEmpty) {
-        buildNumber = '0';
-      }
+      if (buildNumber.isEmpty) buildNumber = '0';
       final currentCode = int.tryParse(buildNumber) ?? 0;
       final platform = Platform.isAndroid ? 'android' : 'ios';
 
-      debugPrint('UpdateService: checking update, currentCode=$currentCode, platform=$platform');
+      debugPrint('=== UpdateService ===');
+      debugPrint('currentVersion=$currentVersion, buildNumber=$buildNumber, currentCode=$currentCode, platform=$platform');
 
-      final response = await _dio.get('/version/check', queryParameters: {
+      // 使用ApiService发起请求（和其他接口共用同一个Dio实例）
+      final res = await ApiService().get('/version/check', queryParameters: {
         'platform': platform,
         'versionCode': '$currentCode',
       });
 
-      debugPrint('UpdateService: response status=${response.statusCode}, data=${response.data}');
+      debugPrint('UpdateService: API response=$res');
 
-      final res = response.data as Map<String, dynamic>;
-
-      if (res['code'] != 200) {
-        debugPrint('UpdateService: API returned code=${res['code']}, msg=${res['msg']}');
+      final code = res['code'];
+      if (code != 200) {
+        debugPrint('UpdateService: API code=$code, msg=${res['msg']}');
         if (!silent && context.mounted) {
-          _showCheckFailed(context, '服务器返回异常');
+          _showCheckFailed(context, '服务器返回异常($code)');
         }
         return;
       }
-      final data = res['data'] as Map<String, dynamic>?;
+
+      final data = res['data'];
       if (data == null) {
         debugPrint('UpdateService: data is null');
         if (!silent && context.mounted) {
-          _showNoUpdate(context);
+          _showNoUpdate(context, currentVersion, buildNumber);
         }
         return;
       }
-      final hasUpdate = data['hasUpdate'] as bool? ?? false;
-      debugPrint('UpdateService: hasUpdate=$hasUpdate');
 
-      if (!hasUpdate) {
-        // silent模式下不弹"已是最新版本"
+      final hasUpdate = data['hasUpdate'];
+      debugPrint('UpdateService: hasUpdate=$hasUpdate, data=$data');
+
+      if (hasUpdate != true) {
         if (!silent && context.mounted) {
-          _showNoUpdate(context);
+          _showNoUpdate(context, currentVersion, buildNumber);
         }
         return;
       }
 
-      // 有更新时，无论silent与否都弹窗
+      // 有更新，无论silent与否都弹窗
       if (context.mounted) {
-        _showUpdateDialog(context, data);
+        _showUpdateDialog(context, data, currentVersion, buildNumber);
       }
     } on DioException catch (e) {
-      debugPrint('UpdateService: DioException type=${e.type}, message=${e.message}');
+      debugPrint('UpdateService: DioException type=${e.type}, message=${e.message}, response=${e.response?.data}');
       if (!silent && context.mounted) {
-        _showCheckFailed(context, '网络连接失败，请检查网络');
+        final msg = e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout
+            ? '连接超时，请重试'
+            : '网络连接失败(${e.type.name})';
+        _showCheckFailed(context, msg);
       }
-    } catch (e) {
-      debugPrint('UpdateService: error=$e');
+    } catch (e, stack) {
+      debugPrint('UpdateService: error=$e\n$stack');
       if (!silent && context.mounted) {
-        _showCheckFailed(context, '检查更新失败');
+        _showCheckFailed(context, '检查更新失败: $e');
       }
     }
   }
 
-  static void _showNoUpdate(BuildContext context) {
-    _showSimpleDialog(context, icon: Icons.check_circle, iconColor: const Color(0xFF52C41A), iconBg: const Color(0xFFF0FFF0), title: '已是最新版本');
+  static void _showNoUpdate(BuildContext context, String version, String buildNumber) {
+    _showSimpleDialog(
+      context,
+      icon: Icons.check_circle,
+      iconColor: const Color(0xFF52C41A),
+      iconBg: const Color(0xFFF0FFF0),
+      title: '已是最新版本',
+      subtitle: '当前版本: v$version ($buildNumber)',
+    );
   }
 
   static void _showCheckFailed(BuildContext context, String msg) {
-    _showSimpleDialog(context, icon: Icons.error_outline, iconColor: const Color(0xFFFF2442), iconBg: const Color(0xFFFFF5F5), title: msg);
+    _showSimpleDialog(
+      context,
+      icon: Icons.error_outline,
+      iconColor: const Color(0xFFFF2442),
+      iconBg: const Color(0xFFFFF5F5),
+      title: msg,
+    );
   }
 
-  static void _showSimpleDialog(BuildContext context, {required IconData icon, required Color iconColor, required Color iconBg, required String title}) {
+  static void _showSimpleDialog(BuildContext context, {required IconData icon, required Color iconColor, required Color iconBg, required String title, String? subtitle}) {
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -99,7 +109,7 @@ class UpdateService {
         child: Material(
           color: Colors.transparent,
           child: Container(
-            width: 260,
+            width: 280,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
             child: Column(
@@ -107,7 +117,11 @@ class UpdateService {
               children: [
                 Container(width: 56, height: 56, decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle), child: Icon(icon, color: iconColor, size: 32)),
                 const SizedBox(height: 12),
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
+                Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF222222))),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 6),
+                  Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                ],
                 const SizedBox(height: 20),
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
@@ -127,12 +141,12 @@ class UpdateService {
     );
   }
 
-  static void _showUpdateDialog(BuildContext context, Map<String, dynamic> data) {
-    final forceUpdate = data['forceUpdate'] as bool? ?? false;
-    final versionName = data['versionName'] as String? ?? '';
+  static void _showUpdateDialog(BuildContext context, Map<String, dynamic> data, String currentVersion, String buildNumber) {
+    final forceUpdate = data['forceUpdate'] == true;
+    final versionName = data['versionName']?.toString() ?? '';
     final updateContent = data['updateContent'] as List? ?? [];
-    final downloadUrl = data['downloadUrl'] as String? ?? '';
-    final packageSize = data['packageSize'] as String? ?? '';
+    final downloadUrl = data['downloadUrl']?.toString() ?? '';
+    final packageSize = data['packageSize']?.toString() ?? '';
 
     showGeneralDialog(
       context: context,
