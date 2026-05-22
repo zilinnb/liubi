@@ -10,25 +10,27 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:video_player/video_player.dart';
 import '../utils/helpers.dart';
 import '../widgets/app_toast.dart';
 
 /// 统一图片预览组件
-/// 支持多图滑动、页码显示、保存、分享
+/// 支持多图滑动、页码显示、保存、分享、实况动图播放
 class ImageViewerScreen extends StatefulWidget {
   final List<String> urls;
   final int initialIndex;
+  final List<String?> liveVideoUrls; // 实况视频URL列表，null表示非实况
 
-  const ImageViewerScreen({super.key, required this.urls, this.initialIndex = 0});
+  const ImageViewerScreen({super.key, required this.urls, this.initialIndex = 0, this.liveVideoUrls = const []});
 
   /// 快速打开图片预览
-  static void open(BuildContext context, {required List<String> urls, int initialIndex = 0}) {
+  static void open(BuildContext context, {required List<String> urls, int initialIndex = 0, List<String?> liveVideoUrls = const []}) {
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.black,
         barrierDismissible: false,
-        pageBuilder: (_, __, ___) => ImageViewerScreen(urls: urls, initialIndex: initialIndex),
+        pageBuilder: (_, __, ___) => ImageViewerScreen(urls: urls, initialIndex: initialIndex, liveVideoUrls: liveVideoUrls),
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 200),
         reverseTransitionDuration: const Duration(milliseconds: 150),
@@ -37,8 +39,8 @@ class ImageViewerScreen extends StatefulWidget {
   }
 
   /// 打开单张图片
-  static void openSingle(BuildContext context, {required String url}) {
-    open(context, urls: [url]);
+  static void openSingle(BuildContext context, {required String url, String? liveVideoUrl}) {
+    open(context, urls: [url], liveVideoUrls: [liveVideoUrl]);
   }
 
   @override
@@ -49,6 +51,40 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   late PageController _ctrl;
   int _current = 0;
   SystemUiOverlayStyle? _previousStyle;
+  VideoPlayerController? _videoCtrl;
+  bool _isLivePlaying = false;
+
+  bool _isLivePhoto(int index) {
+    if (index >= widget.liveVideoUrls.length) return false;
+    final v = widget.liveVideoUrls[index];
+    return v != null && v.isNotEmpty;
+  }
+
+  String? _liveVideoUrl(int index) {
+    if (index >= widget.liveVideoUrls.length) return null;
+    return widget.liveVideoUrls[index];
+  }
+
+  void _startLiveVideo() {
+    final url = _liveVideoUrl(_current);
+    if (url == null) return;
+    final full = url.startsWith('http') ? url : fullUrl(url);
+    _videoCtrl?.dispose();
+    _videoCtrl = VideoPlayerController.networkUrl(Uri.parse(full));
+    _videoCtrl!.initialize().then((_) {
+      if (mounted) {
+        _videoCtrl!.setLooping(true);
+        _videoCtrl!.play();
+        setState(() { _isLivePlaying = true; });
+      }
+    }).catchError((_) {});
+  }
+
+  void _stopLiveVideo() {
+    _videoCtrl?.dispose();
+    _videoCtrl = null;
+    if (mounted) setState(() { _isLivePlaying = false; });
+  }
 
   @override
   void initState() {
@@ -73,6 +109,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         statusBarBrightness: Brightness.light,
       ));
     }
+    _videoCtrl?.dispose();
     _ctrl.dispose();
     super.dispose();
   }
@@ -86,10 +123,11 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final statusBarH = MediaQuery.of(context).padding.top;
+    final isLive = _isLivePhoto(_current);
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
-        // 图片浏览区（长按弹出菜单）
+        // 图片浏览区
         GestureDetector(
           onLongPress: () => _showMenu(),
           child: PhotoViewGallery.builder(
@@ -101,13 +139,81 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             ),
             itemCount: widget.urls.length,
             pageController: _ctrl,
-            onPageChanged: (i) => setState(() => _current = i),
+            onPageChanged: (i) {
+              _stopLiveVideo();
+              setState(() => _current = i);
+            },
             loadingBuilder: (_, __) => const Center(
               child: CupertinoActivityIndicator(radius: 8, color: Colors.white),
             ),
             backgroundDecoration: const BoxDecoration(color: Colors.black),
           ),
         ),
+
+        // 实况视频播放层
+        if (_isLivePlaying && _videoCtrl != null && _videoCtrl!.value.isInitialized)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: _stopLiveVideo,
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: _videoCtrl!.value.size.width,
+                  height: _videoCtrl!.value.size.height,
+                  child: VideoPlayer(_videoCtrl!),
+                ),
+              ),
+            ),
+          ),
+
+        // LIVE标识和播放按钮
+        if (isLive && !_isLivePlaying)
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 80,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: _startLiveVideo,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Image.asset('assets/icons/icon_live_photo.png', width: 16, height: 16, color: Colors.white),
+                    const SizedBox(width: 4),
+                    const Text('LIVE', style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.play_arrow, size: 16, color: Colors.white),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+
+        // 播放中提示
+        if (_isLivePlaying)
+          Positioned(
+            top: statusBarH + 56,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                  const SizedBox(width: 3),
+                  const Text('实况播放中', style: TextStyle(fontSize: 11, color: Colors.white)),
+                ]),
+              ),
+            ),
+          ),
 
         // 顶部栏
         Positioned(

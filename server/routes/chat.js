@@ -41,6 +41,10 @@ router.get('/conversations', auth, async (req, res) => {
 				item.last_message = '[图片]'
 			} else if (c.last_message_type === 4) {
 				item.last_message = '[语音]'
+			} else if (c.last_message_type === 5) {
+				item.last_message = '[实况图片]'
+			} else if (c.last_message_type === 6) {
+				item.last_message = '[红包]'
 			}
 			if (c.type === 1) {
 				const [other] = await db.query(
@@ -306,9 +310,31 @@ router.post('/messages', auth, async (req, res) => {
 		)
 		if (!member.length) return res.json({ code: 403, msg: '无权发送' })
 
+		let finalContent = content
+		// 处理红包消息：扣款
+		if (type === 6) {
+			try {
+				const rpData = JSON.parse(content)
+				const coins = Math.max(0, Math.min(parseInt(rpData.coins) || 0, 10000))
+				if (coins > 0) {
+					const [userRows] = await db.query('SELECT balance FROM user_coins WHERE user_id = ?', [req.user.id])
+					if (!userRows.length || userRows[0].balance < coins) {
+						return res.json({ code: 400, msg: '留币不足' })
+					}
+					await db.query('UPDATE user_coins SET balance = balance - ?, total_spent = total_spent + ? WHERE user_id = ?', [coins, coins, req.user.id])
+					await db.query('INSERT INTO coin_transactions (user_id, type, amount, description) VALUES (?, 2, ?, ?)',
+						[req.user.id, -coins, `聊天红包(${coins}留币)`])
+					rpData.sender_id = req.user.id
+					finalContent = JSON.stringify(rpData)
+				}
+			} catch (e) {
+				console.error('红包处理失败:', e)
+			}
+		}
+
 		const [result] = await db.query(
 			'INSERT INTO chat_messages (conversation_id, sender_id, content, type) VALUES (?, ?, ?, ?)',
-			[conversation_id, req.user.id, content, type || 1]
+			[conversation_id, req.user.id, finalContent, type || 1]
 		)
 
 		await db.query('UPDATE chat_conversations SET updated_at = NOW() WHERE id = ?', [conversation_id])

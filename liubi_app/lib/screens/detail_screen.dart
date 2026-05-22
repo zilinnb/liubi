@@ -73,6 +73,9 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   final ScrollController _scrollCtrl = ScrollController();
   bool _titlePinned = false;
   List<String> _commentImages = [];
+  List<Map<String, dynamic>> _commentImageDetails = [];
+  int _giftCoins = 0;
+  bool _showGiftPanel = false;
   bool _isSubmitting = false;
   bool _showCommentEmojiPanel = false;
   bool _commentEmojiInserting = false;
@@ -87,6 +90,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   bool _isSavingImage = false;
   final ValueNotifier<String> _inputText = ValueNotifier('');
   bool _isEditing = false;
+  bool _isPickingImage = false;
   int? _highlightCommentId;
   late AnimationController _highlightCtrl;
   late AnimationController _likeBounceCtrl;
@@ -179,11 +183,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   }
 
   void _onFocusChange() {
-    if (!_commentFocusNode.hasFocus && _isEditing && !_showCommentEmojiPanel) {
+    if (!_commentFocusNode.hasFocus && _isEditing && !_showCommentEmojiPanel && !_isPickingImage) {
       setState(() {
         _isEditing = false;
         _showCommentEmojiPanel = false;
-        if (_commentCtrl.text.trim().isEmpty && _commentImages.isEmpty && _commentVoicePath == null) {
+        if (_commentCtrl.text.trim().isEmpty && _commentImages.isEmpty && _commentVoicePath == null && _giftCoins == 0) {
           _replyToComment = null;
           _replyParentId = null;
           _replyToUserId = null;
@@ -521,9 +525,18 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     setState(() { _stackExpanded[blockIdx] = !(_stackExpanded[blockIdx] ?? false); });
   }
 
-  void _openGallery(List<String> urls, int initialIndex, {String? liveVideoUrl}) {
+  void _openGallery(List<String> urls, int initialIndex, {String? liveVideoUrl, List<String?>? liveVideoUrls}) {
     _dismissKeyboard();
-    ImageViewerScreen.open(context, urls: urls.map((u) => fullUrl(u)).toList(), initialIndex: initialIndex);
+    List<String?> videoUrls;
+    if (liveVideoUrls != null) {
+      videoUrls = liveVideoUrls;
+    } else if (liveVideoUrl != null) {
+      videoUrls = List<String?>.filled(urls.length, null);
+      videoUrls[initialIndex] = liveVideoUrl;
+    } else {
+      videoUrls = [];
+    }
+    ImageViewerScreen.open(context, urls: urls.map((u) => fullUrl(u)).toList(), initialIndex: initialIndex, liveVideoUrls: videoUrls);
   }
 
   void _setReplyTo(Comment c, {int? parentId, int? replyToUserId}) {
@@ -547,10 +560,16 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   Future<void> _submitComment() async {
     if (_isSubmitting) return;
     final c = _commentCtrl.text.trim();
-    if (c.isEmpty && _commentImages.isEmpty && _commentVoicePath == null) return;
+    if (c.isEmpty && _commentImages.isEmpty && _commentVoicePath == null && _giftCoins == 0) return;
+    // 赠送留币校验由后端处理
+    // 等待图片上传完成
+    while (_imageUploading) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
     setState(() => _isSubmitting = true);
     final pp = Provider.of<PostProvider>(context, listen: false);
     final imageStr = _commentImages.isNotEmpty ? _commentImages.join(',') : '';
+    final imagesList = _commentImageDetails.isNotEmpty ? _commentImageDetails : null;
 
     String? voiceUrl;
     int voiceDuration = _commentVoiceDuration;
@@ -568,9 +587,11 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       content: c,
       parentId: _replyParentId,
       imageUrl: imageStr,
+      images: imagesList,
       voiceUrl: voiceUrl ?? '',
       voiceDuration: voiceDuration,
       replyToUserId: _replyToUserId,
+      giftCoins: _giftCoins,
     );
     if (res['code'] == 200 && mounted) {
       _commentCtrl.clear();
@@ -603,6 +624,9 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       setState(() {
         _isEditing = false;
         _commentImages = [];
+        _commentImageDetails.clear();
+        _giftCoins = 0;
+        _showGiftPanel = false;
         _commentVoicePath = null;
         _commentVoiceDuration = 0;
         _replyToComment = null;
@@ -676,17 +700,43 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   }
 
   Future<void> _pickCommentImage() async {
-    final imgPath = await ImagePickerUtil.pickSingleImage(context);
-    if (imgPath == null) return;
+    _isPickingImage = true;
+    final result = await ImagePickerUtil.pickImages(context, maxAssets: 3);
+    _isPickingImage = false;
+    if (result == null || result.imagePaths.isEmpty) return;
     setState(() { _imageUploading = true; });
     final pp = Provider.of<PostProvider>(context, listen: false);
-    final url = await pp.uploadImage(imgPath);
-    if (url != null && mounted) {
-      setState(() { _commentImages.add(url); _imageUploading = false; });
-    } else if (mounted) {
-      setState(() { _imageUploading = false; });
-      AppToast.error(context, message: '图片上传失败');
+    for (int i = 0; i < result.imagePaths.length; i++) {
+      final url = await pp.uploadImage(result.imagePaths[i]);
+      if (url != null && mounted) {
+        String? videoUrl;
+        if (result.liveVideoPaths[i].isNotEmpty) {
+          videoUrl = await pp.uploadFile(result.liveVideoPaths[i]);
+        }
+        setState(() {
+          _commentImages.add(url);
+          _commentImageDetails.add({
+            'url': url,
+            'video_url': videoUrl ?? '',
+            'media_type': result.isLiveList[i] ? 2 : 1,
+          });
+        });
+      }
     }
+    if (mounted) {
+      setState(() { _imageUploading = false; });
+      // 恢复编辑状态和焦点
+      if (!_isEditing) {
+        setState(() { _isEditing = true; });
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _commentFocusNode.requestFocus();
+      });
+    }
+  }
+
+  void _toggleGiftPanel() {
+    setState(() { _showGiftPanel = !_showGiftPanel; });
   }
 
   Timer? _commentRecTimer;
@@ -2021,6 +2071,61 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
     );
   }
 
+  Widget _buildCommentImages(Comment c) {
+    final imgs = c.images;
+    if (imgs.isEmpty) return const SizedBox.shrink();
+    final count = imgs.length;
+
+    if (count == 1) {
+      final img = imgs.first;
+      return GestureDetector(
+        onTap: () => _openGallery([img.url], 0, liveVideoUrl: img.isLive ? img.videoUrl : null),
+        child: Stack(children: [
+          ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 200), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: 140, fit: BoxFit.cover))),
+          if (img.isLive) Positioned(bottom: 4, left: 4, child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+              const SizedBox(width: 2),
+              const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+            ]),
+          )),
+        ]),
+      );
+    }
+
+    // 多图网格
+    return SizedBox(
+      height: 80,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: count,
+        itemBuilder: (_, i) {
+          final img = imgs[i];
+          return GestureDetector(
+            onTap: () => _openGallery(imgs.map((e) => e.url).toList(), i, liveVideoUrls: imgs.map((e) => e.isLive ? e.videoUrl : null).toList()),
+            child: Container(
+              width: 80, height: 80, margin: const EdgeInsets.only(right: 6),
+              child: Stack(children: [
+                ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: 80, height: 80, fit: BoxFit.cover)),
+                if (img.isLive) Positioned(bottom: 3, left: 3, child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                    const SizedBox(width: 2),
+                    const Text('LIVE', style: TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ]),
+                )),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildCommentItem(Comment c) {
     final a = fullUrl(c.avatar);
     final isA = c.userId == _post?.userId;
@@ -2077,11 +2182,30 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                   ),
                 ),
               ],
-              if (c.imageUrl.isNotEmpty) ...[
+              if (c.images.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                _buildCommentImages(c),
+              ] else if (c.imageUrl.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 GestureDetector(
                   onTap: () => _openGallery([c.imageUrl], 0),
                   child: ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 200), child: CachedNetworkImage(imageUrl: fullUrl(c.imageUrl), width: 140, fit: BoxFit.cover))),
+                ),
+              ],
+              if (c.giftCoins > 0) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [Color(0xFFFFF3E0), Color(0xFFFFE0B2)]),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFFB74D), width: 0.5),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.card_giftcard, size: 14, color: Color(0xFFFF6D00)),
+                    const SizedBox(width: 4),
+                    Text('赠送了 ${c.giftCoins} 留币', style: const TextStyle(fontSize: 12, color: Color(0xFFE65100), fontWeight: FontWeight.w600)),
+                  ]),
                 ),
               ],
               const SizedBox(height: 6),
@@ -2464,8 +2588,18 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                     width: 72, height: 72, margin: const EdgeInsets.only(right: 8),
                     child: Stack(clipBehavior: Clip.none, children: [
                       ClipRRect(borderRadius: BorderRadius.circular(8), child: CachedNetworkImage(imageUrl: fullUrl(_commentImages[i]), width: 72, height: 72, fit: BoxFit.cover)),
+                      if (_commentImageDetails.length > i && _commentImageDetails[i]['media_type'] == 2)
+                        Positioned(bottom: 4, left: 4, child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                          decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                            const SizedBox(width: 2),
+                            const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                          ]),
+                        )),
                       Positioned(top: -6, right: -6, child: GestureDetector(
-                        onTap: () => setState(() => _commentImages.removeAt(i)),
+                        onTap: () => setState(() { _commentImages.removeAt(i); if (i < _commentImageDetails.length) _commentImageDetails.removeAt(i); }),
                         child: Container(width: 20, height: 20, decoration: const BoxDecoration(color: Color(0xCC000000), shape: BoxShape.circle), child: const Icon(Icons.close, size: 12, color: Colors.white)),
                       )),
                     ]),
@@ -2477,6 +2611,12 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         const SizedBox(height: 6),
         Row(children: [
           GestureDetector(onTap: _pickCommentImage, behavior: HitTestBehavior.opaque, child: Container(width: 44, height: 44, alignment: Alignment.center, child: const Icon(Icons.image_outlined, size: 24, color: Color(0xFF666666)))),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: _toggleGiftPanel,
+            behavior: HitTestBehavior.opaque,
+            child: Container(width: 44, height: 44, alignment: Alignment.center, child: Icon(Icons.card_giftcard, size: 24, color: _giftCoins > 0 ? const Color(0xFFFF2442) : const Color(0xFF666666))),
+          ),
           const SizedBox(width: 12),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -2509,7 +2649,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
           ValueListenableBuilder<String>(
             valueListenable: _inputText,
             builder: (_, text, __) {
-              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty || _commentVoicePath != null;
+              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty || _commentVoicePath != null || _giftCoins > 0;
               if (!canSend) return const SizedBox.shrink();
               return GestureDetector(
                 onTap: _isSubmitting ? null : _submitComment,
@@ -2527,6 +2667,35 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             },
           ),
         ]),
+        if (_showGiftPanel)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: const Color(0xFFFFF8F0), borderRadius: BorderRadius.circular(10)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Text('赠送留币', style: TextStyle(fontSize: 13, color: Color(0xFF333333), fontWeight: FontWeight.w600)),
+                const Spacer(),
+                GestureDetector(onTap: () => setState(() { _showGiftPanel = false; }), child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [1, 5, 10, 50, 100].map((v) =>
+                GestureDetector(
+                  onTap: () => setState(() { _giftCoins = _giftCoins == v ? 0 : v; }),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _giftCoins == v ? const Color(0xFFFF2442) : Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: _giftCoins == v ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE)),
+                    ),
+                    child: Text('$v', style: TextStyle(fontSize: 12, color: _giftCoins == v ? Colors.white : const Color(0xFF666666), fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ).toList()),
+            ]),
+          ),
         if (_showCommentEmojiPanel)
           EmojiPickerPanel(
             height: 220,

@@ -101,10 +101,12 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     _titleCtrl.addListener(() => setState(() {}));
     _textControllers.add(EmojiTextEditingController());
     _textFocusNodes.add(FocusNode());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final pp = Provider.of<PostProvider>(context, listen: false);
-      // 每次进入发布页都重新获取分类列表，确保等级限制等最新
-      pp.fetchCategories();
+      final up = Provider.of<UserProvider>(context, listen: false);
+      // 每次进入发布页都重新获取分类列表和用户信息，确保等级限制等最新
+      await pp.fetchCategories();
+      if (up.isLoggedIn) await up.fetchProfile();
 
       final routeArgs = ModalRoute.of(context)?.settings.arguments;
       if (routeArgs is Post) {
@@ -125,10 +127,19 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
       if (widget.initialCategoryId != null) {
         final cat = pp.categories.where((c) => c.id == widget.initialCategoryId).firstOrNull;
         if (cat != null) {
-          setState(() {
-            _selectedCategoryId = cat.id.toString();
-            _selectedCategoryName = cat.name;
-          });
+          // 检查等级限制（管理员跳过）
+          final isAdmin = up.userInfo?.role == 1;
+          final userLevel = up.userInfo?.levelInfo?.level ?? 1;
+          if (!isAdmin && cat.minLevel > 0 && userLevel < cat.minLevel) {
+            if (mounted) {
+              AppToast.info(context, message: '需要到达Lv.${cat.minLevel}以后才能发布笔记');
+            }
+          } else {
+            setState(() {
+              _selectedCategoryId = cat.id.toString();
+              _selectedCategoryName = cat.name;
+            });
+          }
         }
       }
     });
@@ -617,7 +628,7 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
       if (item.existingLiveVideoUrls[i].isNotEmpty) liveIndices.add(i);
     }
     for (int i = 0; i < item.liveVideoPaths.length; i++) {
-      liveIndices.add(item.existingUrls.length + i);
+      if (item.liveVideoPaths[i].isNotEmpty) liveIndices.add(item.existingUrls.length + i);
     }
 
     return Container(
@@ -1718,8 +1729,10 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
                 itemBuilder: (ctx, i) {
                   final cat = cats[i];
                   final isSelected = _selectedCategoryId == cat.id.toString();
-                  final userLevel = Provider.of<UserProvider>(context, listen: false).userInfo?.levelInfo?.level ?? 1;
-                  final isLocked = cat.minLevel > 0 && userLevel < cat.minLevel;
+                  final user = Provider.of<UserProvider>(context, listen: false).userInfo;
+                  final isAdmin = user?.role == 1;
+                  final userLevel = user?.levelInfo?.level ?? 1;
+                  final isLocked = !isAdmin && cat.minLevel > 0 && userLevel < cat.minLevel;
                   return GestureDetector(
                     onTap: () {
                       if (isLocked) {
@@ -1831,8 +1844,10 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
         (c) => c.id.toString() == _selectedCategoryId,
         orElse: () => cats.first,
       );
-      final userLevel = Provider.of<UserProvider>(context, listen: false).userInfo?.levelInfo?.level ?? 1;
-      if (cat.minLevel > 0 && userLevel < cat.minLevel) {
+      final user = Provider.of<UserProvider>(context, listen: false).userInfo;
+      final isAdmin = user?.role == 1;
+      final userLevel = user?.levelInfo?.level ?? 1;
+      if (!isAdmin && cat.minLevel > 0 && userLevel < cat.minLevel) {
         AppToast.info(context, message: '需要到达Lv.${cat.minLevel}以后才能发布笔记');
         return;
       }

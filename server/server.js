@@ -77,9 +77,32 @@ wss.on('connection', (ws, req) => {
 				)
 				if (!memberCheck.length) return
 
+				let finalContent = content
+				// 处理红包消息：扣款
+				if (msg_type === 6) {
+					try {
+						const rpData = JSON.parse(content)
+						const coins = Math.max(0, Math.min(parseInt(rpData.coins) || 0, 10000))
+						if (coins > 0) {
+							const [userRows] = await db.query('SELECT balance FROM user_coins WHERE user_id = ?', [userId])
+							if (!userRows.length || userRows[0].balance < coins) {
+								ws.send(JSON.stringify({ type: 'error', msg: '留币不足' }))
+								return
+							}
+							await db.query('UPDATE user_coins SET balance = balance - ?, total_spent = total_spent + ? WHERE user_id = ?', [coins, coins, userId])
+							await db.query('INSERT INTO coin_transactions (user_id, type, amount, description) VALUES (?, 2, ?, ?)',
+								[userId, -coins, `聊天红包(${coins}留币)`])
+							rpData.sender_id = userId
+							finalContent = JSON.stringify(rpData)
+						}
+					} catch (e) {
+						console.error('红包处理失败:', e)
+					}
+				}
+
 				const [result] = await db.query(
 					'INSERT INTO chat_messages (conversation_id, sender_id, content, type, voice_duration) VALUES (?, ?, ?, ?, ?)',
-					[conversation_id, userId, content, msg_type || 1, voice_duration || 0]
+					[conversation_id, userId, finalContent, msg_type || 1, voice_duration || 0]
 				)
 
 				const [senderRows] = await db.query('SELECT nickname, avatar FROM users WHERE id = ?', [userId])
@@ -91,7 +114,7 @@ wss.on('connection', (ws, req) => {
 					sender_id: userId,
 					sender_name: sender.nickname || '',
 					sender_avatar: sender.avatar || '',
-					content,
+					content: finalContent,
 					type: msg_type || 1,
 					voice_duration: voice_duration || 0,
 					is_recalled: 0,
@@ -392,7 +415,7 @@ async function autoInit() {
 			conversation_id INT UNSIGNED NOT NULL,
 			sender_id INT UNSIGNED NOT NULL,
 			content TEXT NOT NULL,
-			type TINYINT NOT NULL DEFAULT 1 COMMENT '1文本 2图片',
+			type TINYINT NOT NULL DEFAULT 1 COMMENT '1文本 2图片 3系统 4语音 5实况图片 6红包',
 			is_read TINYINT NOT NULL DEFAULT 0,
 			is_recalled TINYINT NOT NULL DEFAULT 0 COMMENT '0未撤回 1已撤回',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

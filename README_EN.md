@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.8-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.0.10-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">Liubi 留笔</h1>
@@ -61,15 +61,17 @@
 
 ### �💬 Social Interaction
 - **Like / Collect**: Bounce animation effects, real-time count updates
-- **Comment System**: Nested replies (threaded), comment like animations, image comments
+- **Comment System**: Nested replies (threaded), comment like animations, image comments, live photo comments, coin gifting
 - **@Mentions**: Auto-complete `@username` in comments, sends notification
 - **Follow System**: Bidirectional follow/follower relationship, mutual follow/follow back/following states, privacy controls
 - **Category Communities**: Tieba-style categories with follow/post/pin/trending
 - **Password Recovery**: Reset password via email verification code, 5-minute validity
 
 ### 📡 Real-Time Communication
-- **Private Chat**: WebSocket real-time messaging, text/image messages
+- **Private Chat**: WebSocket real-time messaging, text/image/live photo/red packet messages
 - **Group Chat**: Join via group code, member management
+- **Red Packet Messages**: WeChat-style red packet send/receive UI, gradient red background + gold buttons
+- **Live Photos**: Chat supports sending live photos, bottom-left Live badge + tap to play
 - **Voice Recording**: WeChat-style waveform animation, swipe up to cancel
 - **Conversation Management**: Pin / Mark as read / Delete with instant UI updates
 - **System Notifications**: Push notifications when app is in background, tap to navigate
@@ -112,7 +114,7 @@
 | Me | `mine_screen.dart` | Xiaohongshu-style profile, collapsible header, posts/collects/liked/activity tabs, level badge/EXP bar/coin entry |
 | Publish | `publish_screen.dart` | Block editor, text/image/voice/link blocks, recording, hashtags, red packets, category level restriction |
 | Detail | `detail_screen.dart` | Post content, image preview (save/share), voice playback, comments (threaded/level badges), appreciation list, like/collect/share, mutual follow status |
-| Chat | `chat_screen.dart` | Private/group chat, message recall, WeChat-style voice recording animation, local cache (200 msgs/conversation) |
+| Chat | `chat_screen.dart` | Private/group chat, message recall, WeChat-style voice recording, red packet send/receive, live photos, local cache (200 msgs/conversation) |
 | Login | `login_screen.dart` | Password login, verification code login, email registration, native loading indicator |
 | Search | `search_screen.dart` | Search posts/users, trending keywords, search history |
 | AI Chat | `ai_chat_screen.dart` | DeepSeek conversation, streaming output, Mac-style code blocks |
@@ -542,6 +544,8 @@ Category Heat = views×0.1 + likes×3 + comments×2 + collects×1.5
 
 | Version | Build | Notes |
 |---------|-------|-------|
+| Beta 0.0.10 | 109 | Fix chat red packet/live photo duplicate send bug, fix comment coin gifting logic bug (always showing "cannot gift yourself"), optimize red packet send UI (gradient red + gold buttons), optimize red packet receive UI (circular avatar + gold amount + open button), fix keyboard overlapping chat input, comment supports live photos and coin gifting, APK obfuscation + compression (ABI split + ProGuard) |
+| Beta 0.0.9 | 108 | Fix remote update/check update, optimize version check API cache, publish button layout fix, red packet post association fix, text-media editor optimization, checkin timezone bug fix, profile page layout optimization, category/trending level display, in-app browser refactor (flutter_inappwebview), APK size optimization (ABI split + obfuscation + compression) |
 | Beta 0.0.8 | 107 | Coin system (checkin/redpacket/appreciate/transactions), Level system (12 levels/EXP/badges/category restrictions), Admin dashboard standalone SPA, Email config DB migration, Password recovery, WeChat-style voice recording animation, Image sharing, AI generation page redesign, Text-only card optimization, Level badges across all scenes |
 | Beta 0.0.6 | 105 | Emoji messages, Live Photo support, Category page optimization, Voice message display optimization, AI chat keyboard overlap fix |
 

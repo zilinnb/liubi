@@ -187,6 +187,8 @@ class ChatService extends ChangeNotifier with WidgetsBindingObserver {
     final msgType = data['type'] as int? ?? 1;
     if (msgType == 2) displayContent = '[图片]';
     if (msgType == 4) displayContent = '[语音]';
+    if (msgType == 5) displayContent = '[实况图片]';
+    if (msgType == 6) displayContent = '[红包]';
     if (msgType == 1 && emojiRegexp.hasMatch(content)) displayContent = '[表情]';
 
     final title = senderName.isNotEmpty ? senderName : '新消息';

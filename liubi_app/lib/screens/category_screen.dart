@@ -603,8 +603,12 @@ class _CategoryScreenState extends State<CategoryScreen> with TickerProviderStat
 
   Widget _buildFAB() {
     final isRestricted = _catInfo?['publish_restriction'] == 1;
-    final isAdmin = Provider.of<UserProvider>(context, listen: false).userInfo?.role == 1;
+    final minLevel = _catInfo?['min_level'] ?? 0;
+    final user = Provider.of<UserProvider>(context, listen: false).userInfo;
+    final isAdmin = user?.role == 1;
+    final userLevel = user?.levelInfo?.level ?? 1;
     if (isRestricted && !isAdmin) return const SizedBox.shrink();
+    if (!isAdmin && minLevel > 0 && userLevel < minLevel) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 30),
       child: GestureDetector(

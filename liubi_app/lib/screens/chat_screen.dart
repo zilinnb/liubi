@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/cupertino.dart';
@@ -122,18 +123,26 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           final senderId = data['sender_id'];
           if (senderId == _currentUserId) {
             final msgId = data['id'];
-            final content = data['content'];
-            final idx = _messages.indexWhere((m) => (m['id'] == null || m['id'] == msgId) && m['sender_id'] == _currentUserId && m['content'] == content);
+            // 用lastIndexWhere查找最近一条没有服务端ID的本地消息
+            final idx = _messages.lastIndexWhere((m) =>
+              m['sender_id'] == _currentUserId &&
+              m['id'] == null
+            );
             if (idx >= 0) {
               setState(() {
                 _messages[idx]['id'] = msgId;
+                _messages[idx]['content'] = data['content'] ?? _messages[idx]['content'];
                 if (data['created_at'] != null) _messages[idx]['created_at'] = data['created_at'];
               });
               StorageService.saveChatMessages(widget.conversationId, _messages);
-            } else if (msgId != null) {
-              final msgData = Map<String, dynamic>.from(data);
-              setState(() => _messages.add(msgData));
-              StorageService.appendChatMessages(widget.conversationId, [msgData]);
+            } else {
+              // 没找到匹配的本地消息，可能是刷新后收到的，不重复添加
+              final existingIdx = _messages.indexWhere((m) => m['id'] != null && m['id'] == msgId);
+              if (existingIdx < 0) {
+                final msgData = Map<String, dynamic>.from(data);
+                setState(() => _messages.add(msgData));
+                StorageService.appendChatMessages(widget.conversationId, [msgData]);
+              }
             }
             _scheduleScrollToBottom();
             return;
@@ -335,6 +344,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       'type': 1,
       'is_recalled': 0,
       'created_at': now,
+      '_localId': '${DateTime.now().microsecondsSinceEpoch}_${_messages.length}',
     };
     setState(() => _messages.add(localMsg));
     _scheduleScrollToBottom();
@@ -357,59 +367,75 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   }
 
   Future<void> _sendImage() async {
-    final imgPath = await ImagePickerUtil.pickSingleImage(context);
-    if (imgPath == null || !mounted) return;
+    final result = await ImagePickerUtil.pickImages(context, maxAssets: 9);
+    if (result == null || result.imagePaths.isEmpty || !mounted) return;
     final up = Provider.of<UserProvider>(context, listen: false);
-    final now = DateTime.now().toIso8601String();
-    final localMsg = {
-      'sender_id': up.userInfo?.id,
-      'sender_name': up.userInfo?.nickname ?? '',
-      'sender_avatar': up.userInfo?.avatar ?? '',
-      'content': '',
-      'type': 2,
-      'is_recalled': 0,
-      'created_at': now,
-      '_localPath': imgPath,
-      '_uploading': true,
-    };
-    setState(() => _messages.add(localMsg));
-    _scheduleScrollToBottom();
-    StorageService.appendChatMessages(widget.conversationId, [localMsg]);
-    try {
-      final res = await ApiService().uploadFile('/upload/single', imgPath);
-      if (res['code'] == 200) {
-        final url = res['data']?['url'] as String?;
-        if (url != null) {
-          setState(() {
-            localMsg['content'] = url;
-            localMsg['_uploading'] = false;
-          });
-          StorageService.saveChatMessages(widget.conversationId, _messages);
-          final cs = Provider.of<ChatService>(context, listen: false);
-          if (!cs.isConnected) {
-            await cs.connect();
-            await Future.delayed(const Duration(milliseconds: 500));
+
+    for (int i = 0; i < result.imagePaths.length; i++) {
+      final imgPath = result.imagePaths[i];
+      final isLive = result.isLiveList.isNotEmpty && result.isLiveList[i];
+      final liveVideoPath = result.liveVideoPaths.isNotEmpty ? result.liveVideoPaths[i] : '';
+
+      final now = DateTime.now().toIso8601String();
+      final localMsg = {
+        'sender_id': up.userInfo?.id,
+        'sender_name': up.userInfo?.nickname ?? '',
+        'sender_avatar': up.userInfo?.avatar ?? '',
+        'content': '',
+        'type': 2,
+        'is_recalled': 0,
+        'created_at': now,
+        '_localPath': imgPath,
+        '_uploading': true,
+        '_isLive': isLive,
+        '_liveVideoPath': liveVideoPath,
+        '_localId': '${DateTime.now().microsecondsSinceEpoch}_${_messages.length}',
+      };
+      setState(() => _messages.add(localMsg));
+      _scheduleScrollToBottom();
+      StorageService.appendChatMessages(widget.conversationId, [localMsg]);
+
+      try {
+        final res = await ApiService().uploadFile('/upload/single', imgPath);
+        if (res['code'] == 200) {
+          final url = res['data']?['url'] as String?;
+          if (url != null) {
+            String? videoUrl;
+            if (isLive && liveVideoPath.isNotEmpty) {
+              final vRes = await ApiService().uploadFile('/upload/single', liveVideoPath);
+              if (vRes['code'] == 200) videoUrl = vRes['data']?['url'] as String?;
+            }
+            setState(() {
+              localMsg['content'] = url;
+              localMsg['_uploading'] = false;
+              if (videoUrl != null) localMsg['_videoUrl'] = videoUrl;
+            });
+            StorageService.saveChatMessages(widget.conversationId, _messages);
+            final cs = Provider.of<ChatService>(context, listen: false);
+            if (!cs.isConnected) {
+              await cs.connect();
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            // 发送实况图片消息，content格式：url|videoUrl 或 url
+            final msgContent = videoUrl != null ? '$url|$videoUrl' : url;
+            await cs.sendMessage(widget.conversationId, msgContent, isLive ? 5 : 2);
           }
-          await cs.sendMessage(widget.conversationId, url, 2);
+        } else {
+          if (mounted) {
+            setState(() {
+              localMsg['_uploading'] = false;
+              localMsg['_uploadFailed'] = true;
+            });
+          }
         }
-      } else {
+      } catch (e) {
+        debugPrint('[ChatScreen] 发送图片失败: $e');
         if (mounted) {
           setState(() {
             localMsg['_uploading'] = false;
             localMsg['_uploadFailed'] = true;
           });
         }
-      }
-    } catch (e) {
-      debugPrint('[ChatScreen] 发送图片失败: $e');
-      if (mounted) {
-        setState(() {
-          localMsg['_uploading'] = false;
-          localMsg['_uploadFailed'] = true;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('图片发送失败，请检查网络'), duration: Duration(seconds: 2)),
-        );
       }
     }
   }
@@ -581,9 +607,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       labels.add('复制');
       callbacks.add(() { _dismissMenu(); Clipboard.setData(ClipboardData(text: msg['content'] ?? '')); });
     }
-    if (msgType == 2) {
+    if (msgType == 2 || msgType == 5) {
       labels.add('保存');
-      callbacks.add(() { _dismissMenu(); _saveChatImage(msg['content'] ?? ''); });
+      callbacks.add(() { _dismissMenu(); _saveChatImage((msg['content'] ?? '').split('|').first); });
     }
     if (canRecall) {
       labels.add('撤回');
@@ -805,8 +831,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
   Widget build(BuildContext context) {
     final statusBarH = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
+    final viewBottom = MediaQuery.of(context).viewInsets.bottom;
     final up = Provider.of<UserProvider>(context);
-    final panelHeight = _showPlusPanel ? 100.0 + bottomPad : (_showEmojiPanel ? 260.0 : 0.0);
+    final panelHeight = _showPlusPanel ? 100.0 + (viewBottom > 0 ? 0 : bottomPad) : (_showEmojiPanel ? 260.0 : 0.0);
     return Scaffold(
       backgroundColor: const Color(0xFFEBEBEB),
       resizeToAvoidBottomInset: true,
@@ -829,7 +856,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
                     ? _buildChatEmojiPanel()
                     : const SizedBox.shrink(),
           ),
-          if (!_showPlusPanel && !_showEmojiPanel)
+          if (!_showPlusPanel && !_showEmojiPanel && viewBottom == 0)
             SizedBox(height: bottomPad),
         ],
       ),
@@ -964,6 +991,100 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
               ],
             ),
           ),
+        ),
+      );
+    }
+
+    if (msgType == 5) {
+      // 实况图片消息
+      final isUploading = msg['_uploading'] == true;
+      final uploadFailed = msg['_uploadFailed'] == true;
+      final localPath = msg['_localPath'] as String?;
+      final rawContent = msg['content'] ?? '';
+      final parts = rawContent.split('|');
+      final imgUrl = fullUrl(parts.isNotEmpty ? parts[0] : '');
+      final videoUrl = parts.length > 1 ? parts[1] : (msg['_videoUrl'] ?? '');
+      return GestureDetector(
+        onTap: isUploading ? null : () {
+          ImageViewerScreen.openSingle(context, url: localPath != null && imgUrl.isEmpty ? localPath : imgUrl, liveVideoUrl: videoUrl.isNotEmpty ? fullUrl(videoUrl) : null);
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(6), topRight: const Radius.circular(6),
+            bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Stack(
+              children: [
+                if (localPath != null && imgUrl.isEmpty)
+                  Image.file(File(localPath), fit: BoxFit.cover, width: 180, height: 180 * 0.75)
+                else if (imgUrl.isNotEmpty)
+                  CachedNetworkImage(imageUrl: imgUrl, fit: BoxFit.cover)
+                else
+                  Container(width: 180, height: 180 * 0.75, color: const Color(0xFFF0F0F0)),
+                // LIVE标识
+                Positioned(bottom: 6, left: 6, child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                    const SizedBox(width: 2),
+                    const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ]),
+                )),
+                if (isUploading)
+                  Container(
+                    color: const Color(0x66000000),
+                    child: const CupertinoActivityIndicator(radius: 14, color: Colors.white),
+                  ),
+                if (uploadFailed)
+                  Container(
+                    color: const Color(0x66000000),
+                    child: const Icon(Icons.error_outline, color: Colors.white, size: 32),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (msgType == 6) {
+      // 留币红包消息 - 微信红包样式
+      Map<String, dynamic> rpData = {};
+      try { rpData = json.decode(msg['content'] ?? '{}'); } catch (_) {}
+      final coins = rpData['coins'] ?? 0;
+      final rpMsg = rpData['message'] ?? '恭喜发财，大吉大利';
+      final isReceived = msg['sender_id'] != Provider.of<UserProvider>(context, listen: false).userInfo?.id;
+
+      return GestureDetector(
+        onTap: () => _openRedPacket(msg, coins, rpMsg),
+        child: Container(
+          width: 200,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isReceived ? const Color(0xFFFF4444) : const Color(0xFFFF6B6B),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(6), topRight: const Radius.circular(6),
+              bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
+            ),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.card_giftcard, size: 28, color: Color(0xFFFFD700)),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('$coins 留币', style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text(rpMsg, style: const TextStyle(fontSize: 11, color: Color(0xFFFFE0B2)), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ])),
+            ]),
+            const SizedBox(height: 8),
+            const Divider(color: Color(0xFFFF8A80), height: 1),
+            const SizedBox(height: 4),
+            Text(isReceived ? '领取红包' : '查看红包', style: const TextStyle(fontSize: 10, color: Color(0xFFFFE0B2))),
+          ]),
         ),
       );
     }
@@ -1321,11 +1442,198 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     );
   }
 
+  void _showRedPacketDialog() {
+    final coinsCtrl = TextEditingController();
+    final msgCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFF4444), Color(0xFFE53935)],
+            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(height: 20),
+            const Text('发红包', style: TextStyle(fontSize: 17, color: Colors.white, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+              child: Column(children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  const Text('留币', style: TextStyle(fontSize: 15, color: Color(0xFF333333), fontWeight: FontWeight.w500)),
+                  const Spacer(),
+                  SizedBox(
+                    width: 120,
+                    child: TextField(
+                      controller: coinsCtrl,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.right,
+                      autofocus: true,
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFF4444)),
+                      decoration: const InputDecoration(
+                        hintText: '0.00',
+                        hintStyle: TextStyle(fontSize: 24, color: Color(0xFFCCCCCC), fontWeight: FontWeight.bold),
+                        border: InputBorder.none,
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ]),
+                const Divider(height: 24),
+                TextField(
+                  controller: msgCtrl,
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF333333)),
+                  maxLength: 20,
+                  decoration: const InputDecoration(
+                    hintText: '恭喜发财，大吉大利',
+                    hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)),
+                    border: InputBorder.none,
+                    isDense: true,
+                    counterText: '',
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 20),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: GestureDetector(
+                onTap: () async {
+                  final coins = int.tryParse(coinsCtrl.text) ?? 0;
+                  if (coins <= 0) { AppToast.info(context, message: '请输入留币数量'); return; }
+                  if (coins > 10000) { AppToast.info(context, message: '单次最多10000留币'); return; }
+                  Navigator.pop(context);
+                  await _sendRedPacket(coins, msgCtrl.text.trim().isEmpty ? '恭喜发财，大吉大利' : msgCtrl.text.trim());
+                },
+                child: Container(
+                  width: double.infinity, height: 44,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [Color(0xFFFFD54F), Color(0xFFFFB300)]),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text('塞钱进红包', style: TextStyle(fontSize: 15, color: Color(0xFFBF360C), fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendRedPacket(int coins, String message) async {
+    final up = Provider.of<UserProvider>(context, listen: false);
+    // 检查留币余额
+    if ((up.userInfo?.coins ?? 0) < coins) {
+      AppToast.info(context, message: '留币不足');
+      return;
+    }
+    final now = DateTime.now().toIso8601String();
+    final localMsg = {
+      'sender_id': up.userInfo?.id,
+      'sender_name': up.userInfo?.nickname ?? '',
+      'sender_avatar': up.userInfo?.avatar ?? '',
+      'content': json.encode({'coins': coins, 'message': message}),
+      'type': 6,
+      'is_recalled': 0,
+      'created_at': now,
+      '_uploading': true,
+      '_localId': '${DateTime.now().microsecondsSinceEpoch}_${_messages.length}',
+    };
+    setState(() => _messages.add(localMsg));
+    _scheduleScrollToBottom();
+    StorageService.appendChatMessages(widget.conversationId, [localMsg]);
+
+    try {
+      final cs = Provider.of<ChatService>(context, listen: false);
+      if (!cs.isConnected) {
+        await cs.connect();
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      await cs.sendMessage(widget.conversationId, json.encode({'coins': coins, 'message': message}), 6);
+      setState(() { localMsg['_uploading'] = false; });
+      StorageService.saveChatMessages(widget.conversationId, _messages);
+    } catch (e) {
+      debugPrint('[ChatScreen] 发送红包失败: $e');
+      if (mounted) {
+        setState(() {
+          localMsg['_uploading'] = false;
+          localMsg['_uploadFailed'] = true;
+        });
+      }
+    }
+  }
+
+  void _openRedPacket(Map<String, dynamic> msg, int coins, String rpMsg) {
+    final up = Provider.of<UserProvider>(context, listen: false);
+    final isSelf = msg['sender_id'] == up.userInfo?.id;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFF4444), Color(0xFFD32F2F)],
+          ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          CircleAvatar(
+            radius: 24,
+            backgroundImage: CachedNetworkImageProvider(fullUrl(msg['sender_avatar'] ?? '')),
+          ),
+          const SizedBox(height: 8),
+          Text(msg['sender_name'] ?? '', style: const TextStyle(fontSize: 13, color: Color(0xFFFFE0B2))),
+          const SizedBox(height: 12),
+          Text(rpMsg, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+          const SizedBox(height: 16),
+          Text('$coins', style: const TextStyle(fontSize: 40, color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, height: 1.2)),
+          const Text('留币', style: TextStyle(fontSize: 13, color: Color(0xFFFFE0B2))),
+          if (!isSelf) ...[
+            const SizedBox(height: 20),
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 80, height: 80,
+                decoration: const BoxDecoration(color: Color(0xFFFFD54F), shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: const Text('开', style: TextStyle(fontSize: 28, color: Color(0xFFBF360C), fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildPlusPanel(double bottomPad) {
     return Container(
       color: const Color(0xFFF7F7F7),
       padding: EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 12 + bottomPad),
-      child: Row(children: [_plusPanelItem(Icons.image_outlined, '图片', _sendImage)]),
+      child: Row(children: [
+        _plusPanelItem(Icons.image_outlined, '图片', _sendImage),
+        const SizedBox(width: 20),
+        _plusPanelItem(Icons.card_giftcard, '红包', _showRedPacketDialog),
+      ]),
     );
   }
 

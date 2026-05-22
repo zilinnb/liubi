@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import '../utils/live_photo_util.dart';
+import '../widgets/live_photo_picker_delegate.dart';
 
 class AssetPickResult {
   final List<String> imagePaths;
@@ -28,21 +29,29 @@ class ImagePickerUtil {
       return null;
     }
 
-    final List<AssetEntity>? assets = await AssetPicker.pickAssets(
-      context,
-      pickerConfig: AssetPickerConfig(
-        maxAssets: maxAssets,
-        requestType: RequestType.image,
-        textDelegate: const AssetPickerTextDelegate(),
-        filterOptions: FilterOptionGroup(
-          imageOption: const FilterOption(
-            sizeConstraint: SizeConstraint(
-              minWidth: 1,
-              minHeight: 1,
-            ),
+    final provider = DefaultAssetPickerProvider(
+      maxAssets: maxAssets,
+      requestType: RequestType.image,
+      filterOptions: FilterOptionGroup(
+        imageOption: const FilterOption(
+          sizeConstraint: SizeConstraint(
+            minWidth: 1,
+            minHeight: 1,
           ),
         ),
       ),
+    );
+
+    final delegate = LivePhotoPickerDelegate(
+      provider: provider,
+      initialPermission: ps,
+    );
+
+    final List<AssetEntity>? assets =
+        await AssetPicker.pickAssetsWithDelegate<AssetEntity, AssetPathEntity,
+            DefaultAssetPickerProvider, LivePhotoPickerDelegate>(
+      context,
+      delegate: delegate,
     );
 
     if (assets == null || assets.isEmpty) {

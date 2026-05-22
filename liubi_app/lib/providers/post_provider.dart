@@ -303,11 +303,13 @@ class PostProvider with ChangeNotifier {
     int? parentId,
     required String content,
     String imageUrl = '',
+    List<Map<String, dynamic>>? images,
     String voiceUrl = '',
     int voiceDuration = 0,
     int? replyToUserId,
+    int giftCoins = 0,
   }) async {
-    return await ApiService().post('/comments', data: {
+    final data = {
       'post_id': postId,
       'parent_id': parentId,
       'content': content,
@@ -315,7 +317,12 @@ class PostProvider with ChangeNotifier {
       'voice_url': voiceUrl,
       'voice_duration': voiceDuration,
       'reply_to_user_id': replyToUserId,
-    });
+      'gift_coins': giftCoins,
+    };
+    if (images != null && images.isNotEmpty) {
+      data['images'] = images;
+    }
+    return await ApiService().post('/comments', data: data);
   }
 
   Future<Map<String, dynamic>> toggleCommentLike(int commentId) async {

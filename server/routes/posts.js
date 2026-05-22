@@ -418,7 +418,7 @@ router.post('/', auth, async (req, res) => {
 				if (catRows[0].publish_restriction === 1 && req.user.role !== 1) {
 					return res.json({ code: 403, msg: '该分类为官方分类，仅管理员可发布' })
 				}
-				if (catRows[0].min_level > 0) {
+				if (catRows[0].min_level > 0 && req.user.role !== 1) {
 					const { getLevelInfo } = require('./level-config')
 					const [lvlRows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [req.user.id])
 					const userLevel = getLevelInfo(lvlRows[0]?.exp || 0)
