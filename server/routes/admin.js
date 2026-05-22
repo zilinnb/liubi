@@ -47,6 +47,7 @@ router.get('/users', async (req, res) => {
 router.put('/users/:id/status', async (req, res) => {
 	try {
 		await db.query('UPDATE users SET status = ? WHERE id = ?', [req.body.status, req.params.id])
+		await redis.del(`user:profile:${req.params.id}`)
 		res.json({ code: 200, msg: '操作成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -67,6 +68,7 @@ router.put('/users/:id', async (req, res) => {
 		if (!fields.length) return res.json({ code: 400, msg: '无更新内容' })
 		vals.push(req.params.id)
 		await db.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, vals)
+		await redis.del(`user:profile:${req.params.id}`)
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
 		console.error(e)
@@ -79,6 +81,7 @@ router.put('/users/:id/mute', async (req, res) => {
 	try {
 		const { mute_until } = req.body
 		await db.query('UPDATE users SET mute_until = ? WHERE id = ?', [mute_until || null, req.params.id])
+		await redis.del(`user:profile:${req.params.id}`)
 		res.json({ code: 200, msg: mute_until ? '禁言成功' : '已解除禁言' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -126,6 +129,9 @@ router.get('/posts', async (req, res) => {
 router.put('/posts/:id/status', async (req, res) => {
 	try {
 		await db.query('UPDATE posts SET status = ? WHERE id = ?', [req.body.status, req.params.id])
+		await redis.del('posts:list:*')
+		await redis.del('posts:trending:*')
+		await redis.del('admin:stats')
 		res.json({ code: 200, msg: '操作成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -136,6 +142,9 @@ router.put('/posts/:id/status', async (req, res) => {
 router.delete('/posts/:id', async (req, res) => {
 	try {
 		await db.query('DELETE FROM posts WHERE id = ?', [req.params.id])
+		await redis.del('posts:list:*')
+		await redis.del('posts:trending:*')
+		await redis.del('admin:stats')
 		res.json({ code: 200, msg: '删除成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -157,6 +166,7 @@ router.post('/categories', async (req, res) => {
 		const { name, icon, cover, description, color, sort_order, publish_restriction, min_level } = req.body
 		if (!name) return res.json({ code: 400, msg: '分类名必填' })
 		await db.query('INSERT INTO categories (name, icon, cover, description, color, sort_order, publish_restriction, min_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [name, icon || '', cover || '', description || '', color || '', sort_order || 0, publish_restriction || 0, min_level || 0])
+		await redis.del('categories:all')
 		res.json({ code: 200, msg: '添加成功' })
 	} catch (e) {
 		if (e.code === 'ER_DUP_ENTRY') return res.json({ code: 400, msg: '分类名已存在' })
@@ -168,6 +178,7 @@ router.put('/categories/:id', async (req, res) => {
 	try {
 		const { name, icon, cover, description, color, sort_order, status, publish_restriction, min_level } = req.body
 		await db.query('UPDATE categories SET name=?, icon=?, cover=?, description=?, color=?, sort_order=?, status=?, publish_restriction=?, min_level=? WHERE id=?', [name, icon, cover || '', description || '', color || '', sort_order, status, publish_restriction || 0, min_level || 0, req.params.id])
+		await redis.del('categories:all')
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
@@ -177,6 +188,7 @@ router.put('/categories/:id', async (req, res) => {
 router.delete('/categories/:id', async (req, res) => {
 	try {
 		await db.query('DELETE FROM categories WHERE id = ?', [req.params.id])
+		await redis.del('categories:all')
 		res.json({ code: 200, msg: '删除成功' })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })

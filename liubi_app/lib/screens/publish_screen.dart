@@ -103,7 +103,8 @@ class _PublishScreenState extends State<PublishScreen> with TickerProviderStateM
     _textFocusNodes.add(FocusNode());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final pp = Provider.of<PostProvider>(context, listen: false);
-      if (pp.categories.isEmpty) pp.fetchCategories();
+      // 每次进入发布页都重新获取分类列表，确保等级限制等最新
+      pp.fetchCategories();
 
       final routeArgs = ModalRoute.of(context)?.settings.arguments;
       if (routeArgs is Post) {
