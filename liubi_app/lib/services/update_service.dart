@@ -11,15 +11,32 @@ class UpdateService {
   static Future<void> checkUpdate(BuildContext context, {bool silent = false}) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
-      final currentCode = int.tryParse(packageInfo.buildNumber) ?? 0;
+      // buildNumber 可能为空，尝试从 version 解析
+      String buildNumber = packageInfo.buildNumber;
+      if (buildNumber.isEmpty) {
+        // 从 version (如 "1.2.3") 解析，如果没有 buildNumber 则使用 0
+        buildNumber = '0';
+      }
+      final currentCode = int.tryParse(buildNumber) ?? 0;
 
       final res = await ApiService().get('/version/check', queryParameters: {
         'platform': Platform.isAndroid ? 'android' : 'ios',
         'versionCode': '$currentCode',
       });
 
-      if (res['code'] != 200) return;
-      final data = res['data'] as Map<String, dynamic>;
+      if (res['code'] != 200) {
+        if (!silent && context.mounted) {
+          _showNoUpdate(context);
+        }
+        return;
+      }
+      final data = res['data'] as Map<String, dynamic>?;
+      if (data == null) {
+        if (!silent && context.mounted) {
+          _showNoUpdate(context);
+        }
+        return;
+      }
       final hasUpdate = data['hasUpdate'] as bool? ?? false;
 
       if (!hasUpdate) {
@@ -32,7 +49,8 @@ class UpdateService {
       if (context.mounted) {
         _showUpdateDialog(context, data);
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Update check error: $e');
       if (!silent && context.mounted) {
         _showNoUpdate(context);
       }

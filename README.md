@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.8-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.0.9-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">留笔 Liubi</h1>
@@ -528,6 +528,7 @@ pm2 save
 
 | 版本 | 构建号 | 说明 |
 |------|--------|------|
+| Beta 0.0.9 | 108 | 修复远程更新/检查更新功能、优化版本检查接口缓存、发布按钮布局修复、红包发送与帖子关联修复、文本媒体混合编辑器优化、签到时区Bug修复、个人主页/他人主页布局优化、分类/热门榜单等级显示、内置浏览器重构(flutter_inappwebview)、APK体积优化(ABI split+混淆+压缩) |
 | Beta 0.0.8 | 107 | 留币系统（签到/红包/赞赏/交易记录）、等级系统（12级/经验值/等级徽章/分类等级限制）、管理后台独立SPA化、邮箱配置数据库化、密码找回、微信风格语音录制动画、图片分享、AI生成页重设计、纯文字卡片优化、等级徽章全场景展示 |
 | Beta 0.0.6 | 105 | 表情消息支持、Live Photo支持、分类页优化、语音消息显示优化、AI聊天键盘遮挡修复 |
 

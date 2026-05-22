@@ -1,5 +1,6 @@
 const express = require('express')
 const db = require('../config/db')
+const redis = require('../config/redis')
 const { auth, adminAuth } = require('../middleware/auth')
 const router = express.Router()
 
@@ -7,6 +8,29 @@ router.get('/check', async (req, res) => {
 	try {
 		const platform = req.query.platform || 'android'
 		const currentCode = parseInt(req.query.versionCode) || 0
+
+		// 尝试从缓存获取
+		const cacheKey = `version:latest:${platform}`
+		let cached = await redis.get(cacheKey)
+		if (cached) {
+			const latest = JSON.parse(cached)
+			if (latest.version_code <= currentCode) {
+				return res.json({ code: 200, data: { hasUpdate: false } })
+			}
+			return res.json({
+				code: 200,
+				data: {
+					hasUpdate: true,
+					versionCode: latest.version_code,
+					versionName: latest.version_name,
+					updateType: latest.update_type,
+					forceUpdate: latest.force_update === 1,
+					downloadUrl: latest.download_url,
+					updateContent: latest.update_content ? latest.update_content.split('\n').filter(s => s.trim()) : [],
+					packageSize: latest.package_size
+				}
+			})
+		}
 
 		const [rows] = await db.query(
 			'SELECT * FROM app_versions WHERE platform = ? AND status = 1 ORDER BY version_code DESC LIMIT 1',
@@ -18,6 +42,9 @@ router.get('/check', async (req, res) => {
 		}
 
 		const latest = rows[0]
+		// 缓存5分钟
+		await redis.set(cacheKey, JSON.stringify(latest), 300)
+
 		if (latest.version_code <= currentCode) {
 			return res.json({ code: 200, data: { hasUpdate: false } })
 		}
