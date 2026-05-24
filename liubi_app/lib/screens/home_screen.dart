@@ -153,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (catIdx < pp.categories.length) {
         final catId = pp.categories[catIdx].id;
         if ((pp.categoryPosts[catId] ?? []).isEmpty && !(pp.categoryLoading[catId] ?? false)) {
-          pp.fetchCategoryPosts(catId, refresh: true);
+          pp.fetchCategoryPosts(catId, refresh: true, sort: 'recommend');
         }
       }
     }
@@ -203,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (catIdx < pp.categories.length) {
         final catId = pp.categories[catIdx].id;
         if (!(pp.categoryNoMore[catId] ?? false) && !(pp.categoryLoading[catId] ?? false)) {
-          pp.fetchCategoryPosts(catId);
+          pp.fetchCategoryPosts(catId, sort: 'recommend');
         }
       }
     }
@@ -226,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } else {
       final catIdx = currentTab - 2;
       if (catIdx < pp.categories.length) {
-        pp.fetchCategoryPosts(pp.categories[catIdx].id, refresh: true);
+        pp.fetchCategoryPosts(pp.categories[catIdx].id, refresh: true, sort: 'recommend');
       }
     }
     _scrollToTop();
@@ -405,21 +405,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Container(
         key: _cateTabKeys[tabIdx],
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(
-            color: isOn ? const Color(0xFFFF2442) : Colors.transparent,
-            width: 2,
-          )),
-        ),
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 150),
-          style: TextStyle(
-            fontSize: 13,
-            color: isOn ? const Color(0xFF222222) : const Color(0xFF999999),
-            fontWeight: isOn ? FontWeight.w600 : FontWeight.w400,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 150),
+            style: TextStyle(
+              fontSize: 13,
+              color: isOn ? const Color(0xFF222222) : const Color(0xFF999999),
+              fontWeight: isOn ? FontWeight.w600 : FontWeight.w400,
+            ),
+            child: Text(name),
           ),
-          child: Text(name),
-        ),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: isOn ? 16 : 0,
+            height: 2.5,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF2442),
+              borderRadius: BorderRadius.circular(1.25),
+            ),
+          ),
+        ]),
       ),
     );
   }
@@ -548,7 +554,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return CustomScrollView(
       controller: tabIdx != null ? _scrollCtrls[tabIdx] : null,
       slivers: [
-        CupertinoSliverRefreshControl(onRefresh: () async => pp.fetchCategoryPosts(catId, refresh: true)),
+        CupertinoSliverRefreshControl(onRefresh: () async => pp.fetchCategoryPosts(catId, refresh: true, sort: 'recommend')),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
           sliver: SliverMasonryGrid.count(

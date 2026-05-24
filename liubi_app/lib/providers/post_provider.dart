@@ -289,9 +289,10 @@ class PostProvider with ChangeNotifier {
     try {
       final res = await ApiService().get('/comments/post/$postId', queryParameters: {'page': page, 'pageSize': pageSize, 'sort': sort});
       if (res['code'] == 200) {
-        final list = res['data'] as List;
+        final data = res['data'] as Map<String, dynamic>;
+        final list = data['list'] as List;
         final comments = list.map((e) => Comment.fromJson(e as Map<String, dynamic>)).toList();
-        final total = res['total'] as int? ?? 0;
+        final total = data['total'] as int? ?? 0;
         return {'comments': comments, 'total': total};
       }
     } catch (_) {}
@@ -307,7 +308,6 @@ class PostProvider with ChangeNotifier {
     String voiceUrl = '',
     int voiceDuration = 0,
     int? replyToUserId,
-    int giftCoins = 0,
   }) async {
     final data = {
       'post_id': postId,
@@ -317,7 +317,6 @@ class PostProvider with ChangeNotifier {
       'voice_url': voiceUrl,
       'voice_duration': voiceDuration,
       'reply_to_user_id': replyToUserId,
-      'gift_coins': giftCoins,
     };
     if (images != null && images.isNotEmpty) {
       data['images'] = images;

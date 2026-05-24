@@ -1,0 +1,13 @@
+ALTER TABLE level_config ADD COLUMN exp_to_next INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '升到下一级需要的经验增量' AFTER exp;
+UPDATE level_config SET exp_to_next=50, exp=0 WHERE level=1;
+UPDATE level_config SET exp_to_next=150, exp=50 WHERE level=2;
+UPDATE level_config SET exp_to_next=300, exp=200 WHERE level=3;
+UPDATE level_config SET exp_to_next=500, exp=500 WHERE level=4;
+UPDATE level_config SET exp_to_next=800, exp=1000 WHERE level=5;
+UPDATE level_config SET exp_to_next=1200, exp=1800 WHERE level=6;
+UPDATE level_config SET exp_to_next=2000, exp=3000 WHERE level=7;
+UPDATE level_config SET exp_to_next=3000, exp=5000 WHERE level=8;
+UPDATE level_config SET exp_to_next=4000, exp=8000 WHERE level=9;
+UPDATE level_config SET exp_to_next=6000, exp=12000 WHERE level=10;
+UPDATE level_config SET exp_to_next=8000, exp=18000 WHERE level=11;
+UPDATE level_config SET exp_to_next=0, exp=26000 WHERE level=12;

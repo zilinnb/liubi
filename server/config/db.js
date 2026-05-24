@@ -10,7 +10,8 @@ const pool = mysql.createPool({
 	waitForConnections: true,
 	connectionLimit: 10,
 	charset: 'utf8mb4',
-	timezone: '+08:00'
+	timezone: '+08:00',
+	dateStrings: true
 })
 
 module.exports = pool

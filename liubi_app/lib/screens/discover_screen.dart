@@ -7,6 +7,7 @@ import '../providers/post_provider.dart';
 import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
+import '../services/storage_service.dart';
 import '../utils/helpers.dart';
 import '../widgets/level_badge.dart';
 import '../models/user.dart';
@@ -56,18 +57,47 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Future<void> _loadData() async {
+    // 先加载本地缓存
+    await _loadFromCache();
+    // 再请求网络
     await Future.wait([_loadTrending(), _loadRecommendUsers(), _loadStats()]);
     if (mounted) setState(() => _loading = false);
   }
 
+  Future<void> _loadFromCache() async {
+    final cachedTrending = await StorageService.getDiscoverTrending();
+    final cachedUsers = await StorageService.getDiscoverUsers();
+    final cachedStats = await StorageService.getDiscoverStats();
+    if (cachedTrending.isNotEmpty || cachedUsers.isNotEmpty || cachedStats != null) {
+      if (mounted) {
+        setState(() {
+          if (cachedTrending.isNotEmpty) _trendingPosts = cachedTrending;
+          if (cachedUsers.isNotEmpty) _recommendUsers = cachedUsers;
+          if (cachedStats != null) {
+            _onlineCount = cachedStats['online'] as int? ?? _onlineCount;
+            _totalPosts = cachedStats['posts'] as int? ?? _totalPosts;
+          }
+          _loading = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadTrending() async {
     try {
-      final res = await ApiService().get('/posts/trending', queryParameters: {'type': 'hot', 'limit': 10});
+      final res = await ApiService().get('/posts/trending', queryParameters: {'type': 'hot', 'page': 1, 'pageSize': 10});
       if (res['code'] == 200 && mounted) {
         final data = res['data'];
-        if (data is List) {
-          setState(() => _trendingPosts = List<Map<String, dynamic>>.from(data.map((e) => Map<String, dynamic>.from(e as Map))));
+        List<Map<String, dynamic>> posts = [];
+        if (data is Map && data['list'] is List) {
+          posts = List<Map<String, dynamic>>.from((data['list'] as List).map((e) => Map<String, dynamic>.from(e as Map)));
+        } else if (data is List) {
+          posts = List<Map<String, dynamic>>.from(data.map((e) => Map<String, dynamic>.from(e as Map)));
         }
+        if (posts.isNotEmpty) {
+          await StorageService.saveDiscoverTrending(posts);
+        }
+        setState(() => _trendingPosts = posts);
       }
     } catch (_) {}
   }
@@ -78,7 +108,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       if (res['code'] == 200 && mounted) {
         final data = res['data'];
         if (data is List) {
-          setState(() => _recommendUsers = List<Map<String, dynamic>>.from(data.map((e) => Map<String, dynamic>.from(e as Map))));
+          final users = List<Map<String, dynamic>>.from(data.map((e) => Map<String, dynamic>.from(e as Map)));
+          if (users.isNotEmpty) {
+            await StorageService.saveDiscoverUsers(users);
+          }
+          setState(() => _recommendUsers = users);
         }
       }
     } catch (_) {}
@@ -88,7 +122,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     try {
       final onlineRes = await ApiService().get('/stats/online');
       if (onlineRes['code'] == 200) {
-        setState(() => _onlineCount = onlineRes['data']?['online_count'] as int? ?? 0);
+        final count = onlineRes['data']?['online_count'] as int? ?? 0;
+        if (mounted) setState(() => _onlineCount = count);
+        await StorageService.saveDiscoverStats({'online': count, 'posts': _totalPosts});
       }
     } catch (_) {}
     try {
@@ -99,11 +135,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         for (final c in cats) {
           posts += (c['post_count'] as int? ?? 0);
         }
-        if (mounted) setState(() => _totalPosts = posts);
+        if (mounted) {
+          setState(() => _totalPosts = posts);
+          await StorageService.saveDiscoverStats({'online': _onlineCount, 'posts': posts});
+        }
       }
-    } catch (_) {}
-    try {
-      final res = await ApiService().get('/users/recommend', queryParameters: {'limit': 1});
     } catch (_) {}
   }
 

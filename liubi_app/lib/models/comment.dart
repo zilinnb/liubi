@@ -34,7 +34,6 @@ class Comment {
   final String content;
   final String imageUrl;
   final List<CommentImage> images;
-  final int giftCoins;
   final String voiceUrl;
   final int voiceDuration;
   int likesCount;
@@ -58,7 +57,6 @@ class Comment {
     this.content = '',
     this.imageUrl = '',
     this.images = const [],
-    this.giftCoins = 0,
     this.voiceUrl = '',
     this.voiceDuration = 0,
     this.likesCount = 0,
@@ -99,7 +97,6 @@ class Comment {
       content: json['content'] ?? '',
       imageUrl: json['image_url'] ?? '',
       images: imagesList,
-      giftCoins: json['gift_coins'] ?? 0,
       voiceUrl: json['voice_url'] ?? '',
       voiceDuration: json['voice_duration'] ?? 0,
       likesCount: json['likes_count'] ?? 0,
@@ -128,7 +125,6 @@ class Comment {
       'content': content,
       'image_url': imageUrl,
       'images': images.map((e) => e.toJson()).toList(),
-      'gift_coins': giftCoins,
       'voice_url': voiceUrl,
       'voice_duration': voiceDuration,
       'likes_count': likesCount,

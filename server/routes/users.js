@@ -257,6 +257,9 @@ router.get('/:id/follows', auth, async (req, res) => {
 	try {
 		const targetId = req.params.id
 		const isSelf = Number(targetId) === req.user.id
+		const page = Math.max(1, parseInt(req.query.page) || 1)
+		const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20))
+		const offset = (page - 1) * pageSize
 
 		if (!isSelf) {
 			const [privacy] = await db.query('SELECT privacy_follows FROM users WHERE id = ?', [targetId])
@@ -269,9 +272,12 @@ router.get('/:id/follows', auth, async (req, res) => {
 			`SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.fans_count
 			FROM follows f LEFT JOIN users u ON f.following_id = u.id
 			WHERE f.follower_id = ? AND u.status = 1
-			ORDER BY f.created_at DESC`,
-			[targetId]
+			ORDER BY f.created_at DESC
+			LIMIT ? OFFSET ?`,
+			[targetId, pageSize, offset]
 		)
+
+		const [[countRow]] = await db.query('SELECT COUNT(*) as total FROM follows f LEFT JOIN users u ON f.following_id = u.id WHERE f.follower_id = ? AND u.status = 1', [targetId])
 
 		const [myFollows] = await db.query(
 			'SELECT following_id FROM follows WHERE follower_id = ?',
@@ -292,7 +298,7 @@ router.get('/:id/follows', auth, async (req, res) => {
 		}
 		rows.forEach(u => { u.level_info = followLevelMap[u.id] || null })
 
-		res.json({ code: 200, data: rows })
+		res.json({ code: 200, data: { list: rows, total: countRow.total, page, pageSize } })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
 	}
@@ -303,6 +309,9 @@ router.get('/:id/fans', auth, async (req, res) => {
 	try {
 		const targetId = req.params.id
 		const isSelf = Number(targetId) === req.user.id
+		const page = Math.max(1, parseInt(req.query.page) || 1)
+		const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20))
+		const offset = (page - 1) * pageSize
 
 		if (!isSelf) {
 			const [privacy] = await db.query('SELECT privacy_fans FROM users WHERE id = ?', [targetId])
@@ -315,9 +324,12 @@ router.get('/:id/fans', auth, async (req, res) => {
 			`SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.fans_count
 			FROM follows f LEFT JOIN users u ON f.follower_id = u.id
 			WHERE f.following_id = ? AND u.status = 1
-			ORDER BY f.created_at DESC`,
-			[targetId]
+			ORDER BY f.created_at DESC
+			LIMIT ? OFFSET ?`,
+			[targetId, pageSize, offset]
 		)
+
+		const [[countRow]] = await db.query('SELECT COUNT(*) as total FROM follows f LEFT JOIN users u ON f.follower_id = u.id WHERE f.following_id = ? AND u.status = 1', [targetId])
 
 		const [myFollows] = await db.query(
 			'SELECT following_id FROM follows WHERE follower_id = ?',
@@ -338,7 +350,7 @@ router.get('/:id/fans', auth, async (req, res) => {
 		}
 		rows.forEach(u => { u.level_info = fanLevelMap[u.id] || null })
 
-		res.json({ code: 200, data: rows })
+		res.json({ code: 200, data: { list: rows, total: countRow.total, page, pageSize } })
 	} catch (e) {
 		res.json({ code: 500, msg: '服务器错误' })
 	}

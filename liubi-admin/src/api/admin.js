@@ -41,6 +41,12 @@ export const getLevelConfig = () => request.get('/api/coins/level-config')
 export const getCoinConfig = () => request.get('/api/coins/config')
 export const updateCoinConfig = (data) => request.put('/api/coins/config', data)
 
+// 经验配置
+export const getExpTaskConfig = () => request.get('/api/coins/admin/exp-task-config')
+export const updateExpTaskConfig = (type, data) => request.put(`/api/coins/admin/exp-task-config/${type}`, data)
+export const getAdminLevelConfig = () => request.get('/api/coins/admin/level-config')
+export const updateLevelConfig = (level, data) => request.put(`/api/coins/admin/level-config/${level}`, data)
+
 // AI配置
 export const getAIConfig = () => request.get('/api/admin/ai-config')
 export const updateAIConfig = (data) => request.put('/api/admin/ai-config', data)

@@ -46,22 +46,6 @@
       </div>
     </div>
 
-    <!-- 等级配置 -->
-    <div class="card" style="margin-bottom: 20px;">
-      <div class="card-header">等级配置</div>
-      <el-table :data="levelConfig" stripe style="width: 100%;">
-        <el-table-column prop="level" label="等级" width="100">
-          <template #default="{ row }">
-            <el-tag type="warning" size="small">Lv.{{ row.level }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="150" />
-        <el-table-column prop="minExp" label="所需经验值" width="150">
-          <template #default="{ row }">{{ row.minExp ?? row.min_exp ?? '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </div>
-
     <!-- 签到配置 -->
     <div class="card">
       <div class="card-header">签到配置</div>
@@ -121,7 +105,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getCoinUsers, adjustCoins, adjustExp, getLevelConfig, getCoinConfig, updateCoinConfig } from '../api/admin'
+import { getCoinUsers, adjustCoins, adjustExp, getCoinConfig, updateCoinConfig } from '../api/admin'
 
 const loading = ref(false)
 const configLoading = ref(false)
@@ -129,7 +113,6 @@ const savingConfig = ref(false)
 const adjustLoading = ref(false)
 const expLoading = ref(false)
 const coinUsers = ref([])
-const levelConfig = ref([])
 const coinConfigList = ref([])
 const coinConfigForm = reactive({})
 const total = ref(0)
@@ -161,15 +144,6 @@ const loadCoinUsers = async () => {
   } catch {} finally {
     loading.value = false
   }
-}
-
-const loadLevelConfig = async () => {
-  try {
-    const res = await getLevelConfig()
-    if (res.code === 200) {
-      levelConfig.value = res.data?.list || res.data || []
-    }
-  } catch {}
 }
 
 const loadCoinConfig = async () => {
@@ -262,7 +236,6 @@ const submitAdjustExp = async () => {
 
 onMounted(() => {
   loadCoinUsers()
-  loadLevelConfig()
   loadCoinConfig()
 })
 </script>

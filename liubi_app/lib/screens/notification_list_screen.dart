@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/user_provider.dart';
 import '../services/api_service.dart';
+import '../services/storage_service.dart';
 import '../utils/helpers.dart';
 
 class NotificationListScreen extends StatefulWidget {
@@ -20,9 +21,11 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
   bool _loading = true;
   int _page = 1;
   bool _noMore = false;
+  bool _loadingMore = false;
   String _currentTypeNum = '';
   bool _showBackTop = false;
   bool _scrollScheduled = false;
+  static const int _pageSize = 20;
 
   List<_SubTab> _subTabs = [];
 
@@ -68,6 +71,14 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
       final show = _scrollCtrl.offset > 300;
       if (show != _showBackTop) {
         setState(() => _showBackTop = show);
+      }
+      // 上拉加载更多
+      if (!_loadingMore && !_noMore) {
+        final maxScroll = _scrollCtrl.position.maxScrollExtent;
+        final currentScroll = _scrollCtrl.position.pixels;
+        if (maxScroll - currentScroll <= 300) {
+          _loadMore();
+        }
       }
     });
   }
@@ -147,15 +158,78 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
   }
 
   Future<void> _loadNotifications() async {
+    // 第一页先尝试加载本地缓存
+    if (_page == 1) {
+      final cached = await StorageService.getNotifications(widget.type, _currentTypeNum);
+      if (cached.isNotEmpty && mounted) {
+        setState(() {
+          _notifications = cached;
+          _loading = false;
+        });
+      }
+    }
     try {
-      final res = await ApiService().get('/notifications?type=$_currentTypeNum&page=$_page');
+      final res = await ApiService().get('/notifications', queryParameters: {'type': _currentTypeNum, 'page': _page, 'pageSize': _pageSize});
       if (res['code'] == 200 && mounted) {
-        final list = res['data'] as List? ?? [];
-        final items = list.map((e) => e as Map<String, dynamic>).toList();
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => e as Map<String, dynamic>).toList();
+        final total = data['total'] as int? ?? 0;
         if (widget.type == 'follow') {
           final seen = <int>{};
           final deduped = <Map<String, dynamic>>[];
-          for (final item in items.reversed) {
+          for (final item in list.reversed) {
+            final userId = item['from_user_id'] as int? ?? 0;
+            if (userId > 0 && !seen.contains(userId)) {
+              seen.add(userId);
+              deduped.insert(0, item);
+            }
+          }
+          for (final item in deduped) {
+            final userId = item['from_user_id'] as int? ?? 0;
+            if (userId > 0 && item['is_followed'] == null) {
+              try {
+                final checkRes = await ApiService().get('/users/$userId/follow-status');
+                if (checkRes['code'] == 200) {
+                  item['is_followed'] = checkRes['data']?['is_followed'] ?? false;
+                  item['is_fan'] = checkRes['data']?['is_fan'] ?? false;
+                }
+              } catch (_) {}
+            }
+          }
+          setState(() {
+            if (_page == 1) { _notifications = deduped; } else { _notifications.addAll(deduped); }
+            _noMore = _notifications.length >= total;
+            _loading = false;
+          });
+          if (_page == 1) await StorageService.saveNotifications(widget.type, _currentTypeNum, _notifications);
+        } else {
+          setState(() {
+            if (_page == 1) { _notifications = list; } else { _notifications.addAll(list); }
+            _noMore = _notifications.length >= total;
+            _loading = false;
+          });
+          if (_page == 1) await StorageService.saveNotifications(widget.type, _currentTypeNum, _notifications);
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _noMore) return;
+    setState(() => _loadingMore = true);
+    _page++;
+    try {
+      final res = await ApiService().get('/notifications', queryParameters: {'type': _currentTypeNum, 'page': _page, 'pageSize': _pageSize});
+      if (res['code'] == 200 && mounted) {
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => e as Map<String, dynamic>).toList();
+        final total = data['total'] as int? ?? 0;
+        if (widget.type == 'follow') {
+          final seen = <int>{};
+          final deduped = <Map<String, dynamic>>[];
+          for (final item in list.reversed) {
             final userId = item['from_user_id'] as int? ?? 0;
             if (userId > 0 && !seen.contains(userId)) {
               seen.add(userId);
@@ -176,19 +250,23 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
           }
           setState(() {
             _notifications.addAll(deduped);
-            if (deduped.length < 20) _noMore = true;
-            _loading = false;
+            _noMore = _notifications.length >= total;
+            _loadingMore = false;
           });
         } else {
           setState(() {
-            _notifications.addAll(items);
-            if (list.length < 20) _noMore = true;
-            _loading = false;
+            _notifications.addAll(list);
+            _noMore = _notifications.length >= total;
+            _loadingMore = false;
           });
         }
+      } else {
+        _page--;
+        setState(() => _loadingMore = false);
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      _page--;
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -234,15 +312,16 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
           ),
           if (_subTabs.length > 1)
             Container(
-              decoration: const BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 0.5))),
+              decoration: const BoxDecoration(color: Colors.white),
               child: TabBar(
                 controller: _tabCtrl,
                 labelColor: const Color(0xFF222222),
                 unselectedLabelColor: const Color(0xFF999999),
                 indicatorColor: const Color(0xFFFF2442),
                 indicatorSize: TabBarIndicatorSize.label,
-                indicatorWeight: 2,
-                labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                indicatorWeight: 2.5,
+                dividerColor: Colors.transparent,
+                labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                 unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
                 tabs: _subTabs.map((t) => Tab(text: t.label)).toList(),
               ),
@@ -314,6 +393,10 @@ class _NotificationListScreenState extends State<NotificationListScreen> with Si
             childCount: filtered.length,
           ),
         ),
+        if (_loadingMore)
+          const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CupertinoActivityIndicator(radius: 10)))),
+        if (_noMore && filtered.isNotEmpty)
+          const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('没有更多了', style: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)))))),
         const SliverToBoxAdapter(child: SizedBox(height: 80)),
       ],
     );

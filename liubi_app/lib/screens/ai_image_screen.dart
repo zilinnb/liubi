@@ -327,7 +327,7 @@ class _AiImageScreenState extends State<AiImageScreen> with TickerProviderStateM
       await file.writeAsBytes(response.data);
       if (mounted) {
         Navigator.of(context).pop(); // 关闭loading
-        await Share.shareXFiles([XFile(file.path)], text: '来自留笔AI绘画');
+        await Share.shareXFiles([XFile(file.path)], text: '来自liubi AI绘画');
         // 分享完成后删除临时文件
         if (await file.exists()) await file.delete();
       }
@@ -371,7 +371,7 @@ class _AiImageScreenState extends State<AiImageScreen> with TickerProviderStateM
       final dir = await getTemporaryDirectory();
       final filePath = '${dir.path}/ai_image_${DateTime.now().millisecondsSinceEpoch}.png';
       await Dio().download(imageUrl, filePath);
-      await Gal.putImage(filePath, album: '留笔AI');
+      await Gal.putImage(filePath, album: 'liubiai');
       if (context.mounted) {
         Navigator.of(context).pop();
         AppToast.success(context, message: '保存成功');

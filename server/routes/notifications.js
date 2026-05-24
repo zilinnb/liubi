@@ -7,23 +7,34 @@ const { sendNotificationEmail } = require('../utils/mailer')
 router.get('/', auth, async (req, res) => {
 	try {
 		const { type } = req.query
-		let sql = `SELECT m.*, u.nickname as from_nickname, u.avatar as from_avatar FROM messages m LEFT JOIN users u ON m.from_user_id = u.id WHERE m.to_user_id = ?`
-		const params = [req.user.id]
+		const page = Math.max(1, parseInt(req.query.page) || 1)
+		const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20))
+		const offset = (page - 1) * pageSize
 
+		// 构建条件
+		let whereSql = 'm.to_user_id = ?'
+		const baseParams = [req.user.id]
 		if (type && type !== '0') {
 			const types = String(type).split(',').map(t => parseInt(t)).filter(t => !isNaN(t))
 			if (types.length === 1) {
-				sql += ' AND m.type = ?'
-				params.push(types[0])
+				whereSql += ' AND m.type = ?'
+				baseParams.push(types[0])
 			} else if (types.length > 1) {
-				sql += ' AND m.type IN (?)'
-				params.push(types)
+				whereSql += ' AND m.type IN (?)'
+				baseParams.push(types)
 			}
 		}
 
-		sql += ' ORDER BY m.created_at DESC LIMIT 50'
-		const [rows] = await db.query(sql, params)
-		res.json({ code: 200, data: rows })
+		// 查总数
+		const [[totalRow]] = await db.query(`SELECT COUNT(*) as total FROM messages m WHERE ${whereSql}`, baseParams)
+
+		// 查列表
+		const [rows] = await db.query(
+			`SELECT m.*, u.nickname as from_nickname, u.avatar as from_avatar FROM messages m LEFT JOIN users u ON m.from_user_id = u.id WHERE ${whereSql} ORDER BY m.created_at DESC LIMIT ? OFFSET ?`,
+			[...baseParams, pageSize, offset]
+		)
+
+		res.json({ code: 200, data: { list: rows, total: totalRow.total, page, pageSize } })
 	} catch(e) {
 		console.error('get notifications error:', e)
 		res.json({ code: 500, msg: '获取通知失败' })

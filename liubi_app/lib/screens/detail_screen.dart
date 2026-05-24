@@ -74,8 +74,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   bool _titlePinned = false;
   List<String> _commentImages = [];
   List<Map<String, dynamic>> _commentImageDetails = [];
-  int _giftCoins = 0;
-  bool _showGiftPanel = false;
+
   bool _isSubmitting = false;
   bool _showCommentEmojiPanel = false;
   bool _commentEmojiInserting = false;
@@ -187,7 +186,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       setState(() {
         _isEditing = false;
         _showCommentEmojiPanel = false;
-        if (_commentCtrl.text.trim().isEmpty && _commentImages.isEmpty && _commentVoicePath == null && _giftCoins == 0) {
+        if (_commentCtrl.text.trim().isEmpty && _commentImages.isEmpty && _commentVoicePath == null) {
           _replyToComment = null;
           _replyParentId = null;
           _replyToUserId = null;
@@ -560,13 +559,13 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   Future<void> _submitComment() async {
     if (_isSubmitting) return;
     final c = _commentCtrl.text.trim();
-    if (c.isEmpty && _commentImages.isEmpty && _commentVoicePath == null && _giftCoins == 0) return;
-    // 赠送留币校验由后端处理
+    if (c.isEmpty && _commentImages.isEmpty && _commentVoicePath == null) return;
     // 等待图片上传完成
     while (_imageUploading) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
     setState(() => _isSubmitting = true);
+    try {
     final pp = Provider.of<PostProvider>(context, listen: false);
     final imageStr = _commentImages.isNotEmpty ? _commentImages.join(',') : '';
     final imagesList = _commentImageDetails.isNotEmpty ? _commentImageDetails : null;
@@ -591,7 +590,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       voiceUrl: voiceUrl ?? '',
       voiceDuration: voiceDuration,
       replyToUserId: _replyToUserId,
-      giftCoins: _giftCoins,
     );
     if (res['code'] == 200 && mounted) {
       _commentCtrl.clear();
@@ -625,8 +623,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         _isEditing = false;
         _commentImages = [];
         _commentImageDetails.clear();
-        _giftCoins = 0;
-        _showGiftPanel = false;
         _commentVoicePath = null;
         _commentVoiceDuration = 0;
         _replyToComment = null;
@@ -683,6 +679,13 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       });
     } else if (mounted) {
       setState(() => _isSubmitting = false);
+      AppToast.error(context, message: res['msg']?.toString().isNotEmpty == true ? res['msg'].toString() : '评论失败，请重试');
+    }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        AppToast.error(context, message: '网络异常，请重试');
+      }
     }
   }
 
@@ -733,10 +736,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         _commentFocusNode.requestFocus();
       });
     }
-  }
-
-  void _toggleGiftPanel() {
-    setState(() { _showGiftPanel = !_showGiftPanel; });
   }
 
   Timer? _commentRecTimer;
@@ -1406,8 +1405,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
   String _formatDate(String dateStr) {
     try {
       final dt = DateTime.parse(dateStr);
-      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return '${months[dt.month - 1]} ${dt.day},\n${dt.year}';
+      return '${dt.year}年${dt.month}月${dt.day}日';
     } catch (_) {
       return dateStr;
     }
@@ -1586,7 +1584,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
       final filePath = '${dir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final file = File(filePath);
       await file.writeAsBytes(Uint8List.fromList(response.data));
-      await Gal.putImage(filePath, album: '留笔');
+      await Gal.putImage(filePath, album: 'liubi');
       _dismissActionLoading();
       if (mounted) {
         AppToast.success(context, message: '已保存到相册');
@@ -2198,22 +2196,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                   child: ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 200), child: CachedNetworkImage(imageUrl: fullUrl(c.imageUrl), width: 140, fit: BoxFit.cover))),
                 ),
               ],
-              if (c.giftCoins > 0) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Color(0xFFFFF3E0), Color(0xFFFFE0B2)]),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFFB74D), width: 0.5),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.card_giftcard, size: 14, color: Color(0xFFFF6D00)),
-                    const SizedBox(width: 4),
-                    Text('赠送了 ${c.giftCoins} 留币', style: const TextStyle(fontSize: 12, color: Color(0xFFE65100), fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              ],
               const SizedBox(height: 6),
               Row(children: [
                 Text(fmtTime(c.createdAt), style: const TextStyle(fontSize: 11, color: Color(0xFFBBBBBB))),
@@ -2622,12 +2604,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
           GestureDetector(onTap: _pickCommentImage, behavior: HitTestBehavior.opaque, child: Container(width: 44, height: 44, alignment: Alignment.center, child: const Icon(Icons.image_outlined, size: 24, color: Color(0xFF666666)))),
           const SizedBox(width: 12),
           GestureDetector(
-            onTap: _toggleGiftPanel,
-            behavior: HitTestBehavior.opaque,
-            child: Container(width: 44, height: 44, alignment: Alignment.center, child: Icon(Icons.card_giftcard, size: 24, color: _giftCoins > 0 ? const Color(0xFFFF2442) : const Color(0xFF666666))),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () {
               if (_isCommentRecording) {
@@ -2658,7 +2634,7 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
           ValueListenableBuilder<String>(
             valueListenable: _inputText,
             builder: (_, text, __) {
-              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty || _commentVoicePath != null || _giftCoins > 0;
+              final canSend = text.trim().isNotEmpty || _commentImages.isNotEmpty || _commentVoicePath != null;
               if (!canSend) return const SizedBox.shrink();
               return GestureDetector(
                 onTap: _isSubmitting ? null : _submitComment,
@@ -2676,35 +2652,6 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
             },
           ),
         ]),
-        if (_showGiftPanel)
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFFFFF8F0), borderRadius: BorderRadius.circular(10)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Text('赠送留币', style: TextStyle(fontSize: 13, color: Color(0xFF333333), fontWeight: FontWeight.w600)),
-                const Spacer(),
-                GestureDetector(onTap: () => setState(() { _showGiftPanel = false; }), child: const Icon(Icons.close, size: 16, color: Color(0xFF999999))),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [1, 5, 10, 50, 100].map((v) =>
-                GestureDetector(
-                  onTap: () => setState(() { _giftCoins = _giftCoins == v ? 0 : v; }),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _giftCoins == v ? const Color(0xFFFF2442) : Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: _giftCoins == v ? const Color(0xFFFF2442) : const Color(0xFFEEEEEE)),
-                    ),
-                    child: Text('$v', style: TextStyle(fontSize: 12, color: _giftCoins == v ? Colors.white : const Color(0xFF666666), fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ).toList()),
-            ]),
-          ),
         if (_showCommentEmojiPanel)
           EmojiPickerPanel(
             height: 220,

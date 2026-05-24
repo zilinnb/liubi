@@ -742,7 +742,9 @@ class _MineScreenState extends State<MineScreen>
     // currentExp: 当前等级内已获经验, nextLevelExp: 下一级所需总经验(0=满级)
     // exp: 用户总经验
     final needExp = isMaxLevel ? 0 : (levelInfo.nextLevelExp - levelInfo.exp);
-    return Column(
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, '/exp-center'),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 6),
@@ -780,6 +782,7 @@ class _MineScreenState extends State<MineScreen>
           ),
         ),
       ],
+    ),
     );
   }
 

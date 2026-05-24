@@ -9,6 +9,7 @@ import '../providers/post_provider.dart';
 import '../models/post.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/storage_service.dart';
 import '../utils/helpers.dart';
 import '../widgets/post_card.dart';
 import '../widgets/app_toast.dart';
@@ -58,10 +59,24 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Future<void> _loadUser() async {
+    // 先尝试加载本地缓存
+    final cached = await StorageService.getUserProfile(widget.userId);
+    if (cached != null && mounted) {
+      setState(() {
+        _user = cached;
+        _isFollowing = cached['is_followed'] == true;
+        _isFan = cached['is_fan'] == true;
+        _loading = false;
+      });
+      _loadPosts();
+      _loadActivities();
+      _findConversation();
+    }
     try {
       final data = await Provider.of<UserProvider>(context, listen: false)
           .fetchUserProfile(widget.userId);
       if (data != null && mounted) {
+        await StorageService.saveUserProfile(widget.userId, data);
         setState(() {
           _user = data;
           _isFollowing = data['is_followed'] == true;
@@ -731,21 +746,24 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Widget _bgStatItem(String count, String label) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(count,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              shadows: [Shadow(color: Colors.black26, blurRadius: 4)],
-            )),
-        const SizedBox(height: 1),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 10, color: Colors.white70)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(count,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                shadows: [Shadow(color: Colors.black26, blurRadius: 4)],
+              )),
+          const SizedBox(height: 1),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 10, color: Colors.white70)),
+        ],
+      ),
     );
   }
 
@@ -761,7 +779,9 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     final levelColor = _getLevelColor(levelInfo.level);
     final isMaxLevel = levelInfo.nextLevelExp <= 0 || levelInfo.progress >= 1.0;
     final needExp = isMaxLevel ? 0 : (levelInfo.nextLevelExp - levelInfo.exp);
-    return Column(
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, '/exp-center'),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 6),
@@ -799,6 +819,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
           ),
         ),
       ],
+    ),
     );
   }
 

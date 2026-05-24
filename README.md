@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Version-Beta%200.0.10-red?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-Beta%200.1.0-red?style=flat-square" alt="Version">
 </p>
 
 <h1 align="center">留笔 Liubi</h1>

@@ -357,6 +357,47 @@ router.post('/messages', auth, async (req, res) => {
 	}
 })
 
+// 领取红包
+router.post('/redpacket/claim', auth, async (req, res) => {
+	try {
+		const { message_id } = req.body
+		if (!message_id) return res.json({ code: 400, msg: '参数不完整' })
+
+		// 查询红包消息
+		const [msgs] = await db.query('SELECT * FROM chat_messages WHERE id = ? AND type = 6', [message_id])
+		if (!msgs.length) return res.json({ code: 404, msg: '红包不存在' })
+		const msg = msgs[0]
+
+		// 不能领取自己的红包
+		if (msg.sender_id === req.user.id) return res.json({ code: 400, msg: '不能领取自己的红包' })
+
+		// 解析红包数据
+		let rpData
+		try { rpData = JSON.parse(msg.content) } catch { return res.json({ code: 400, msg: '红包数据异常' }) }
+		const coins = Math.max(0, parseInt(rpData.coins) || 0)
+		if (coins <= 0) return res.json({ code: 400, msg: '红包金额异常' })
+
+		// 检查是否已领取
+		if (rpData.claimed_by) return res.json({ code: 400, msg: '红包已被领取' })
+
+		// 领取：更新红包消息标记为已领取
+		rpData.claimed_by = req.user.id
+		rpData.claimed_at = new Date().toISOString()
+		await db.query('UPDATE chat_messages SET content = ? WHERE id = ?', [JSON.stringify(rpData), message_id])
+
+		// 增加领取者留币
+		await db.query('INSERT INTO user_coins (user_id, balance) VALUES (?, ?) ON DUPLICATE KEY UPDATE balance = balance + ?', [req.user.id, coins, coins])
+		// 记录流水
+		await db.query('INSERT INTO coin_transactions (user_id, type, amount, description) VALUES (?, 3, ?, ?)',
+			[req.user.id, coins, `领取红包(${coins}留币)`])
+
+		res.json({ code: 200, data: { coins, message: rpData.message || '恭喜发财，大吉大利' } })
+	} catch (e) {
+		console.error('领取红包失败:', e)
+		res.json({ code: 500, msg: '服务器错误' })
+	}
+})
+
 // 获取未读私信总数
 router.get('/unread', auth, async (req, res) => {
 	try {

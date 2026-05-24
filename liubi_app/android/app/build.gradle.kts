@@ -44,8 +44,11 @@ android {
         applicationId = "com.liubi.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 36
-        versionCode = 108
-        versionName = "Beta 0.0.9"
+        versionCode = 109
+        versionName = "Beta 0.1.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -58,15 +61,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-    }
-
-    splits {
-        abi {
-            isEnable = gradle.startParameter.taskNames.any { it.contains("Release") }
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
         }
     }
 

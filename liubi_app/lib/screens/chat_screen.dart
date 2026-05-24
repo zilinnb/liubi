@@ -698,7 +698,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
       final filePath = '${dir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final file = File(filePath);
       await file.writeAsBytes(Uint8List.fromList(response.data));
-      await Gal.putImage(filePath, album: '留笔');
+      await Gal.putImage(filePath, album: 'liubi');
       try { await file.delete(); } catch (_) {}
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1054,20 +1054,27 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     }
 
     if (msgType == 6) {
-      // 留币红包消息 - 微信红包样式
+      // 留币红包消息
       Map<String, dynamic> rpData = {};
       try { rpData = json.decode(msg['content'] ?? '{}'); } catch (_) {}
       final coins = rpData['coins'] ?? 0;
       final rpMsg = rpData['message'] ?? '恭喜发财，大吉大利';
+      final isClaimed = rpData['claimed_by'] != null;
       final isReceived = msg['sender_id'] != Provider.of<UserProvider>(context, listen: false).userInfo?.id;
 
+      // 已领取：灰色样式
+      final bgColor = isClaimed ? const Color(0xFFBDBDBD) : (isReceived ? const Color(0xFFFF4444) : const Color(0xFFFF6B6B));
+      final iconColor = isClaimed ? const Color(0xFF9E9E9E) : const Color(0xFFFFD700);
+      final textColor = isClaimed ? const Color(0xFF757575) : Colors.white;
+      final subTextColor = isClaimed ? const Color(0xFF9E9E9E) : const Color(0xFFFFE0B2);
+
       return GestureDetector(
-        onTap: () => _openRedPacket(msg, coins, rpMsg),
+        onTap: () => _openRedPacket(msg, coins, rpMsg, isClaimed),
         child: Container(
           width: 200,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: isReceived ? const Color(0xFFFF4444) : const Color(0xFFFF6B6B),
+            color: bgColor,
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(6), topRight: const Radius.circular(6),
               bottomLeft: Radius.circular(isSelf ? 6 : 2), bottomRight: Radius.circular(isSelf ? 2 : 6),
@@ -1075,18 +1082,18 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              const Icon(Icons.card_giftcard, size: 28, color: Color(0xFFFFD700)),
+              Icon(Icons.card_giftcard, size: 28, color: iconColor),
               const SizedBox(width: 8),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('$coins 留币', style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+                Text('$coins 留币', style: TextStyle(fontSize: 16, color: textColor, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 2),
-                Text(rpMsg, style: const TextStyle(fontSize: 11, color: Color(0xFFFFE0B2)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(rpMsg, style: TextStyle(fontSize: 11, color: subTextColor), maxLines: 1, overflow: TextOverflow.ellipsis),
               ])),
             ]),
             const SizedBox(height: 8),
-            const Divider(color: Color(0xFFFF8A80), height: 1),
+            Divider(color: isClaimed ? const Color(0xFFE0E0E0) : const Color(0xFFFF8A80), height: 1),
             const SizedBox(height: 4),
-            Text(isReceived ? '领取红包' : '查看红包', style: const TextStyle(fontSize: 10, color: Color(0xFFFFE0B2))),
+            Text(isClaimed ? '已领取' : (isReceived ? '领取红包' : '查看红包'), style: TextStyle(fontSize: 10, color: subTextColor)),
           ]),
         ),
       );
@@ -1456,58 +1463,62 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: Container(
           decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFFF4444), Color(0xFFE53935)],
-            ),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // 顶部拖拽条
+            Container(margin: const EdgeInsets.only(top: 8), width: 36, height: 4, decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            // 标题
+            const Text('发红包', style: TextStyle(fontSize: 16, color: Color(0xFF333333), fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
-            const Text('发红包', style: TextStyle(fontSize: 17, color: Colors.white, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 20),
+            // 金额输入
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 20),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              decoration: BoxDecoration(color: const Color(0xFFF7F7F7), borderRadius: BorderRadius.circular(10)),
               child: Column(children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                  const Text('留币', style: TextStyle(fontSize: 15, color: Color(0xFF333333), fontWeight: FontWeight.w500)),
+                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  const Text('留币', style: TextStyle(fontSize: 14, color: Color(0xFF666666))),
                   const Spacer(),
                   SizedBox(
-                    width: 120,
+                    width: 140,
                     child: TextField(
                       controller: coinsCtrl,
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.right,
                       autofocus: true,
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFF4444)),
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF333333)),
                       decoration: const InputDecoration(
-                        hintText: '0.00',
-                        hintStyle: TextStyle(fontSize: 24, color: Color(0xFFCCCCCC), fontWeight: FontWeight.bold),
+                        hintText: '0',
+                        hintStyle: TextStyle(fontSize: 22, color: Color(0xFFCCCCCC), fontWeight: FontWeight.bold),
                         border: InputBorder.none,
                         isDense: true,
+                        contentPadding: EdgeInsets.zero,
                       ),
                     ),
                   ),
                 ]),
-                const Divider(height: 24),
+                const Divider(height: 20, thickness: 0.5, color: Color(0xFFEEEEEE)),
+                // 祝福语
                 TextField(
                   controller: msgCtrl,
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF333333)),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
                   maxLength: 20,
                   decoration: const InputDecoration(
                     hintText: '恭喜发财，大吉大利',
-                    hintStyle: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)),
+                    hintStyle: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
                     border: InputBorder.none,
                     isDense: true,
+                    contentPadding: EdgeInsets.zero,
                     counterText: '',
                   ),
                 ),
               ]),
             ),
             const SizedBox(height: 20),
+            // 发送按钮
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: GestureDetector(
@@ -1519,17 +1530,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
                   await _sendRedPacket(coins, msgCtrl.text.trim().isEmpty ? '恭喜发财，大吉大利' : msgCtrl.text.trim());
                 },
                 child: Container(
-                  width: double.infinity, height: 44,
+                  width: double.infinity, height: 42,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Color(0xFFFFD54F), Color(0xFFFFB300)]),
-                    borderRadius: BorderRadius.circular(22),
+                    color: const Color(0xFFFF2442),
+                    borderRadius: BorderRadius.circular(21),
                   ),
                   alignment: Alignment.center,
-                  child: const Text('塞钱进红包', style: TextStyle(fontSize: 15, color: Color(0xFFBF360C), fontWeight: FontWeight.w600)),
+                  child: const Text('塞钱进红包', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
           ]),
         ),
       ),
@@ -1579,51 +1590,51 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
     }
   }
 
-  void _openRedPacket(Map<String, dynamic> msg, int coins, String rpMsg) {
+  void _openRedPacket(Map<String, dynamic> msg, int coins, String rpMsg, bool isClaimed) {
     final up = Provider.of<UserProvider>(context, listen: false);
     final isSelf = msg['sender_id'] == up.userInfo?.id;
-    showModalBottomSheet(
+
+    showDialog(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFF4444), Color(0xFFD32F2F)],
-          ),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 8),
-          CircleAvatar(
-            radius: 24,
-            backgroundImage: CachedNetworkImageProvider(fullUrl(msg['sender_avatar'] ?? '')),
-          ),
-          const SizedBox(height: 8),
-          Text(msg['sender_name'] ?? '', style: const TextStyle(fontSize: 13, color: Color(0xFFFFE0B2))),
-          const SizedBox(height: 12),
-          Text(rpMsg, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-          const SizedBox(height: 16),
-          Text('$coins', style: const TextStyle(fontSize: 40, color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, height: 1.2)),
-          const Text('留币', style: TextStyle(fontSize: 13, color: Color(0xFFFFE0B2))),
-          if (!isSelf) ...[
-            const SizedBox(height: 20),
-            GestureDetector(
-              onTap: () {
-                Navigator.pop(context);
-              },
-              child: Container(
-                width: 80, height: 80,
-                decoration: const BoxDecoration(color: Color(0xFFFFD54F), shape: BoxShape.circle),
-                alignment: Alignment.center,
-                child: const Text('开', style: TextStyle(fontSize: 28, color: Color(0xFFBF360C), fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-        ]),
+      barrierColor: Colors.black54,
+      builder: (ctx) => _RedPacketDialog(
+        senderAvatar: msg['sender_avatar'] ?? '',
+        senderName: msg['sender_name'] ?? '',
+        coins: coins,
+        message: rpMsg,
+        isSelf: isSelf,
+        isClaimed: isClaimed,
+        onClaim: isSelf || isClaimed ? null : () async {
+          final msgId = msg['id'];
+          if (msgId == null) {
+            AppToast.info(context, message: '红包尚未送达，请稍后领取');
+            return;
+          }
+          try {
+            final res = await ApiService().post('/chat/redpacket/claim', data: {'message_id': msgId});
+            if (res['code'] == 200) {
+              // 更新本地消息状态
+              try {
+                final rpData = json.decode(msg['content'] ?? '{}');
+                rpData['claimed_by'] = up.userInfo?.id;
+                msg['content'] = json.encode(rpData);
+              } catch (_) {}
+              setState(() {});
+              StorageService.saveChatMessages(widget.conversationId, _messages);
+              // 刷新用户留币
+              up.fetchProfile();
+              Navigator.of(ctx).pop();
+              AppToast.info(context, message: '领取成功！获得${res['data']?['coins'] ?? coins}留币');
+            } else {
+              Navigator.of(ctx).pop();
+              AppToast.info(context, message: res['msg'] ?? '领取失败');
+            }
+          } catch (e) {
+            Navigator.of(ctx).pop();
+            AppToast.info(context, message: '领取失败，请重试');
+          }
+        },
+        onClose: () => Navigator.of(ctx).pop(),
       ),
     );
   }
@@ -1759,5 +1770,129 @@ class ChatEmojiSpanBuilder extends SpecialTextSpanBuilder {
       return ChatEmojiText(textStyle, onTap: onTap, startIndex: startIndex);
     }
     return null;
+  }
+}
+
+// 红包领取弹窗
+class _RedPacketDialog extends StatefulWidget {
+  final String senderAvatar;
+  final String senderName;
+  final int coins;
+  final String message;
+  final bool isSelf;
+  final bool isClaimed;
+  final VoidCallback? onClaim;
+  final VoidCallback onClose;
+
+  const _RedPacketDialog({
+    required this.senderAvatar,
+    required this.senderName,
+    required this.coins,
+    required this.message,
+    required this.isSelf,
+    required this.isClaimed,
+    this.onClaim,
+    required this.onClose,
+  });
+
+  @override
+  State<_RedPacketDialog> createState() => _RedPacketDialogState();
+}
+
+class _RedPacketDialogState extends State<_RedPacketDialog> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scaleAnim;
+  late Animation<double> _rotateAnim;
+  bool _claiming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _scaleAnim = CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut);
+    _rotateAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isGray = widget.isClaimed || widget.isSelf;
+    return Center(
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: 260,
+            decoration: BoxDecoration(
+              color: isGray ? const Color(0xFFBDBDBD) : const Color(0xFFFF4444),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // 关闭按钮
+              Align(
+                alignment: Alignment.topRight,
+                child: GestureDetector(
+                  onTap: widget.onClose,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(Icons.close, size: 18, color: Colors.white54),
+                  ),
+                ),
+              ),
+              // 头像
+              CircleAvatar(
+                radius: 22,
+                backgroundImage: CachedNetworkImageProvider(fullUrl(widget.senderAvatar)),
+              ),
+              const SizedBox(height: 6),
+              Text(widget.senderName, style: TextStyle(fontSize: 12, color: isGray ? const Color(0xFF757575) : const Color(0xFFFFE0B2))),
+              const SizedBox(height: 8),
+              // 祝福语
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(widget.message, style: TextStyle(fontSize: 12, color: isGray ? const Color(0xFF9E9E9E) : Colors.white70), textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: 12),
+              // 金额
+              Text('${widget.coins}', style: TextStyle(fontSize: 36, color: isGray ? const Color(0xFF9E9E9E) : const Color(0xFFFFD54F), fontWeight: FontWeight.bold, height: 1.2)),
+              Text('留币', style: TextStyle(fontSize: 12, color: isGray ? const Color(0xFF9E9E9E) : const Color(0xFFFFE0B2))),
+              const SizedBox(height: 16),
+              // 开按钮 / 已领取
+              if (!widget.isSelf && !widget.isClaimed)
+                GestureDetector(
+                  onTap: _claiming ? null : () {
+                    setState(() => _claiming = true);
+                    widget.onClaim?.call();
+                  },
+                  child: RotationTransition(
+                    turns: _rotateAnim,
+                    child: Container(
+                      width: 64, height: 64,
+                      decoration: const BoxDecoration(color: Color(0xFFFFD54F), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x33FFD54F), blurRadius: 12)]),
+                      alignment: Alignment.center,
+                      child: _claiming
+                        ? const SizedBox(width: 20, height: 20, child: CupertinoActivityIndicator(radius: 8, color: Color(0xFFBF360C)))
+                        : const Text('开', style: TextStyle(fontSize: 24, color: Color(0xFFBF360C), fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(widget.isClaimed ? '已领取' : '我发出的红包', style: const TextStyle(fontSize: 12, color: Color(0xFF9E9E9E))),
+                ),
+              const SizedBox(height: 16),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }

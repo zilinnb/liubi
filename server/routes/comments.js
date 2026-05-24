@@ -39,6 +39,9 @@ async function processMentions(fromUserId, text, postId, commentId) {
 router.get('/post/:postId', async (req, res) => {
 	try {
 		const sort = req.query.sort || 'latest'
+		const page = Math.max(1, parseInt(req.query.page) || 1)
+		const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20))
+		const offset = (page - 1) * pageSize
 		let orderClause
 		if (sort === 'hot') {
 			orderClause = 'c.is_pinned DESC, c.likes_count DESC, c.created_at DESC'
@@ -51,9 +54,12 @@ router.get('/post/:postId', async (req, res) => {
 			FROM comments c
 			LEFT JOIN users u ON c.user_id = u.id
 			WHERE c.post_id = ? AND c.status = 1
-			ORDER BY ${orderClause}`,
-			[req.params.postId]
+			ORDER BY ${orderClause}
+			LIMIT ? OFFSET ?`,
+			[req.params.postId, pageSize, offset]
 		)
+
+		const [[countRow]] = await db.query('SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND status = 1', [req.params.postId])
 
 		const token = req.headers.authorization?.replace('Bearer ', '')
 		let likedSet = new Set()
@@ -101,7 +107,6 @@ router.get('/post/:postId', async (req, res) => {
 			const item = {
 				...r,
 				is_pinned: Number(r.is_pinned) || 0,
-				gift_coins: Number(r.gift_coins) || 0,
 				images: imagesList,
 				subComments: [],
 				isLiked: likedSet.has(r.id),
@@ -118,32 +123,18 @@ router.get('/post/:postId', async (req, res) => {
 			}
 		})
 
-		res.json({ code: 200, data: list })
+		res.json({ code: 200, data: { list, total: countRow.total, page, pageSize } })
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })
 	}
 })
 
-// 发表评论（支持多图、实况、@提及、留币赠送）
+// 发表评论（支持多图、实况、@提及）
 router.post('/', auth, async (req, res) => {
 	try {
-		const { post_id, parent_id, content, image_url, images, voice_url, voice_duration, reply_to_user_id, gift_coins } = req.body
+		const { post_id, parent_id, content, image_url, images, voice_url, voice_duration, reply_to_user_id } = req.body
 		if (!post_id || (!content && !image_url && !images && !voice_url)) return res.json({ code: 400, msg: '参数不完整' })
-
-		// 留币赠送校验
-		const coins = Math.max(0, Math.min(parseInt(gift_coins) || 0, 10000))
-		if (coins > 0) {
-			// 不能赠送自己
-			const [postRows0] = await db.query('SELECT user_id FROM posts WHERE id = ?', [post_id])
-			if (postRows0.length && postRows0[0].user_id === req.user.id) {
-				return res.json({ code: 400, msg: '不能赠送自己留币' })
-			}
-			const [userRows] = await db.query('SELECT coins FROM users WHERE id = ?', [req.user.id])
-			if (!userRows.length || userRows[0].coins < coins) {
-				return res.json({ code: 400, msg: '留币不足' })
-			}
-		}
 
 		const clientIp = getClientIp(req)
 		const location = await getIpLocation(clientIp)
@@ -158,26 +149,10 @@ router.post('/', auth, async (req, res) => {
 		}
 
 		const [result] = await db.query(
-			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, images, voice_url, voice_duration, gift_coins, location, reply_to_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-			[post_id, req.user.id, parent_id || null, content || '', image_url || '', imagesJson, voice_url || '', voice_duration || 0, coins, location, reply_to_user_id || null]
+			'INSERT INTO comments (post_id, user_id, parent_id, content, image_url, images, voice_url, voice_duration, location, reply_to_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+			[post_id, req.user.id, parent_id || null, content || '', image_url || '', imagesJson, voice_url || '', voice_duration || 0, location, reply_to_user_id || null]
 		)
 		await db.query('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?', [post_id])
-
-		// 留币赠送：扣减发送者，增加帖子作者
-		if (coins > 0) {
-			await db.query('UPDATE users SET coins = coins - ? WHERE id = ?', [coins, req.user.id])
-			// 增加帖子作者的留币
-			const [postRows] = await db.query('SELECT user_id FROM posts WHERE id = ?', [post_id])
-			if (postRows.length) {
-				await db.query('UPDATE users SET coins = coins + ? WHERE id = ?', [coins, postRows[0].user_id])
-				// 记录留币流水 - 发送者支出
-				await db.query('INSERT INTO coin_transactions (user_id, type, amount, related_id, description) VALUES (?, 4, ?, ?, ?)',
-					[req.user.id, -coins, post_id, `评论赠送留币`])
-				// 记录留币流水 - 接收者收入
-				await db.query('INSERT INTO coin_transactions (user_id, type, amount, related_id, description) VALUES (?, 5, ?, ?, ?)',
-					[postRows[0].user_id, coins, post_id, `收到评论赠送留币`])
-			}
-		}
 
 		await db.query('UPDATE users SET location = ? WHERE id = ?', [location, req.user.id])
 
@@ -186,21 +161,21 @@ router.post('/', auth, async (req, res) => {
 			const [parent] = await db.query('SELECT user_id FROM comments WHERE id = ?', [parent_id])
 			if (parent.length && parent[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id, comment_id) VALUES (?, ?, 2, ?, ?, ?)',
-					[req.user.id, parent[0].user_id, coins > 0 ? `评论并赠送了${coins}留币` : '回复了你的评论', post_id, result.insertId])
+					[req.user.id, parent[0].user_id, '回复了你的评论', post_id, result.insertId])
 				pushNotification(db, parent[0].user_id, 2, req.user.id, post_id, result.insertId)
 			}
 		} else {
 			const [post] = await db.query('SELECT user_id FROM posts WHERE id = ?', [post_id])
 			if (post.length && post[0].user_id !== req.user.id) {
 				await db.query('INSERT INTO messages (from_user_id, to_user_id, type, content, target_id, comment_id) VALUES (?, ?, 2, ?, ?, ?)',
-					[req.user.id, post[0].user_id, coins > 0 ? `评论并赠送了${coins}留币` : '评论了你的笔记', post_id, result.insertId])
+					[req.user.id, post[0].user_id, '评论了你的笔记', post_id, result.insertId])
 				pushNotification(db, post[0].user_id, 2, req.user.id, post_id, result.insertId)
 			}
 		}
 
 		// 记录活动
 		await db.query('INSERT INTO activities (user_id, type, target_id, target_type, content) VALUES (?, 3, ?, 1, ?)',
-			[req.user.id, post_id, coins > 0 ? `评论并赠送${coins}留币` : '评论了笔记'])
+			[req.user.id, post_id, '评论了笔记'])
 
 		// 处理@提及
 		if (content) {
@@ -208,7 +183,7 @@ router.post('/', auth, async (req, res) => {
 		}
 
 		res.json({ code: 200, msg: '评论成功', data: { id: result.insertId, location } })
-		addExp(req.user.id, EXP_RULES.comment).catch(() => {})
+		addExp(req.user.id, EXP_RULES.comment, 2, '发表评论').catch(() => {})
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })

@@ -19,6 +19,12 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   int _sortIdx = 0;
   bool _showBackTop = false;
   final ValueNotifier<double> _collapse = ValueNotifier(0);
+  int _hotPage = 1;
+  int _latestPage = 1;
+  bool _hotNoMore = false;
+  bool _latestNoMore = false;
+  bool _loadingMore = false;
+  static const int _pageSize = 20;
 
   late TabController _sortTabCtrl;
   final ScrollController _scrollCtrl = ScrollController();
@@ -47,6 +53,7 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
   }
 
   List<Post> get _currentPosts => _sortIdx == 0 ? _hotPosts : _latestPosts;
+  bool get _currentNoMore => _sortIdx == 0 ? _hotNoMore : _latestNoMore;
 
   void _scrollToTop() {
     _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
@@ -56,17 +63,57 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
     setState(() => _loading = true);
     try {
       final type = _sortIdx == 0 ? 'hot' : 'latest';
-      final res = await ApiService().get('/posts/trending', queryParameters: {'type': type, 'limit': 100});
+      final res = await ApiService().get('/posts/trending', queryParameters: {'type': type, 'page': 1, 'pageSize': _pageSize});
       if (res['code'] == 200 && mounted) {
-        final data = res['data'] as List? ?? [];
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => Post.fromJson(e as Map<String, dynamic>)).toList();
+        final total = data['total'] as int? ?? 0;
         setState(() {
-          final posts = data.map((e) => Post.fromJson(e as Map<String, dynamic>)).toList();
-          if (_sortIdx == 0) { _hotPosts = posts; } else { _latestPosts = posts; }
+          if (_sortIdx == 0) {
+            _hotPosts = list;
+            _hotPage = 1;
+            _hotNoMore = _hotPosts.length >= total;
+          } else {
+            _latestPosts = list;
+            _latestPage = 1;
+            _latestNoMore = _latestPosts.length >= total;
+          }
           _loading = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _currentNoMore) return;
+    setState(() => _loadingMore = true);
+    final nextPage = (_sortIdx == 0 ? _hotPage : _latestPage) + 1;
+    try {
+      final type = _sortIdx == 0 ? 'hot' : 'latest';
+      final res = await ApiService().get('/posts/trending', queryParameters: {'type': type, 'page': nextPage, 'pageSize': _pageSize});
+      if (res['code'] == 200 && mounted) {
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => Post.fromJson(e as Map<String, dynamic>)).toList();
+        final total = data['total'] as int? ?? 0;
+        setState(() {
+          if (_sortIdx == 0) {
+            _hotPosts.addAll(list);
+            _hotPage = nextPage;
+            _hotNoMore = _hotPosts.length >= total;
+          } else {
+            _latestPosts.addAll(list);
+            _latestPage = nextPage;
+            _latestNoMore = _latestPosts.length >= total;
+          }
+          _loadingMore = false;
+        });
+      } else {
+        setState(() => _loadingMore = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -190,12 +237,17 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
         clipBehavior: Clip.hardEdge,
         children: [
           Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
+            decoration: BoxDecoration(
+              color: Color.lerp(const Color(0xFFFF2442), Colors.white, cp),
+              gradient: cp < 1.0 ? LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFFFF2442), Color(0xFFFF5A6E), Color(0xFFFF8A9E)],
-              ),
+                colors: [
+                  Color.lerp(const Color(0xFFFF2442), Colors.white, cp)!,
+                  Color.lerp(const Color(0xFFFF5A6E), Colors.white, cp)!,
+                  Color.lerp(const Color(0xFFFF8A9E), Colors.white, cp)!,
+                ],
+              ) : null,
             ),
           ),
           Positioned(
@@ -232,25 +284,41 @@ class _TrendingScreenState extends State<TrendingScreen> with TickerProviderStat
     return RefreshIndicator(
       color: const Color(0xFFFF2442),
       onRefresh: _loadTrending,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
-            sliver: SliverMasonryGrid.count(
-              crossAxisCount: 2,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childCount: posts.length,
-              itemBuilder: (_, i) {
-                return PostCard(
-                  post: posts[i],
-                  onTap: () => Navigator.pushNamed(context, '/detail', arguments: posts[i].id),
-                  onLike: (_) {},
-                );
-              },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollUpdateNotification && !_loadingMore && !_currentNoMore) {
+            final metrics = notification.metrics;
+            if (metrics.maxScrollExtent - metrics.pixels <= 300) {
+              _loadMore();
+            }
+          }
+          return false;
+        },
+        child: CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+              sliver: SliverMasonryGrid.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childCount: posts.length,
+                itemBuilder: (_, i) {
+                  return PostCard(
+                    post: posts[i],
+                    onTap: () => Navigator.pushNamed(context, '/detail', arguments: posts[i].id),
+                    onLike: (_) {},
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+            if (_loadingMore)
+              const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CupertinoActivityIndicator(radius: 10, color: Color(0xFFFF2442))))),
+            if (_currentNoMore && posts.isNotEmpty)
+              const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('没有更多了', style: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)))))),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
+          ],
+        ),
       ),
     );
   }

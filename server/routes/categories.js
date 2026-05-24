@@ -106,29 +106,41 @@ router.post('/:id/follow', auth, async (req, res) => {
 // 获取分类下的帖子列表（分页）
 router.get('/:id/posts', async (req, res) => {
 	try {
-		const { page = 1, pageSize = 20, sort = 'latest' } = req.query
+		const { page = 1, pageSize = 20, sort = 'latest', include_pinned } = req.query
 		const offset = (page - 1) * pageSize
+		const withPinned = include_pinned === '1'
 
 		const orderMap = {
 			latest: 'p.created_at DESC',
 			hot: '(p.views_count * 0.1 + p.likes_count * 3 + p.comments_count * 2 + p.collects_count * 1.5) DESC',
+			recommend: `(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) / POW(1 + TIMESTAMPDIFF(HOUR, p.created_at, NOW()) / 12.0, 1.5) * (0.6 + RAND() * 0.8) DESC, p.created_at DESC`,
 			most_liked: 'p.likes_count DESC',
 		}
 		const orderBy = orderMap[sort] || orderMap.latest
 
-		const [pinnedRows] = await db.query(
-			`SELECT p.*, u.nickname, u.avatar FROM posts p LEFT JOIN users u ON p.user_id = u.id
-			WHERE p.category_id = ? AND p.status = 1 AND p.is_pinned = 1 AND p.pinned_category_id = ?
-			ORDER BY p.pinned_at DESC`,
-			[req.params.id, req.params.id]
-		)
+		// 始终排除置顶帖（置顶帖单独查询后拼到前面）
+		const pinnedWhere = ' AND (p.is_pinned = 0 OR p.is_pinned IS NULL)'
 
 		const [rows] = await db.query(
 			`SELECT p.*, u.nickname, u.avatar FROM posts p LEFT JOIN users u ON p.user_id = u.id
-			WHERE p.category_id = ? AND p.status = 1 AND (p.is_pinned = 0 OR p.pinned_category_id != ? OR p.pinned_category_id IS NULL)
+			WHERE p.category_id = ? AND p.status = 1${pinnedWhere}
 			ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-			[req.params.id, req.params.id, Number(pageSize), Number(offset)]
+			[req.params.id, Number(pageSize), Number(offset)]
 		)
+
+		// 分类详情页额外查询置顶帖
+		let pinnedRows = []
+		let pinnedCount = 0
+		if (withPinned) {
+			const [pr] = await db.query(
+				`SELECT p.*, u.nickname, u.avatar FROM posts p LEFT JOIN users u ON p.user_id = u.id
+				WHERE p.category_id = ? AND p.status = 1 AND p.is_pinned = 1
+				ORDER BY p.pinned_at DESC`,
+				[req.params.id]
+			)
+			pinnedRows = pr
+			pinnedCount = pr.length
+		}
 
 		const allRows = [...pinnedRows, ...rows]
 		const postIds = allRows.map(r => r.id)
@@ -149,7 +161,6 @@ router.get('/:id/posts', async (req, res) => {
 			})
 		}
 
-		const pinnedIds = new Set(pinnedRows.map(r => r.id))
 		const list = allRows.map(r => {
 			const imgs = imgMap[r.id] || []
 			return {
@@ -158,12 +169,11 @@ router.get('/:id/posts', async (req, res) => {
 				images: imgs,
 				isLiked: false,
 				isCollected: false,
-				is_pinned: pinnedIds.has(r.id) ? 1 : 0
 			}
 		})
-		const [countRows] = await db.query('SELECT COUNT(*) as total FROM posts WHERE category_id = ? AND status = 1', [req.params.id])
+		const [countRows] = await db.query('SELECT COUNT(*) as total FROM posts WHERE category_id = ? AND status = 1 AND (is_pinned = 0 OR is_pinned IS NULL)', [req.params.id])
 
-		res.json({ code: 200, data: { list, pinned_count: pinnedRows.length, total: countRows[0].total, page: Number(page), pageSize: Number(pageSize) } })
+		res.json({ code: 200, data: { list, total: countRows[0].total, page: Number(page), pageSize: Number(pageSize), pinned_count: pinnedCount } })
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })

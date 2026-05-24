@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'providers/post_provider.dart';
 import 'providers/user_provider.dart';
@@ -27,6 +28,7 @@ import 'screens/image_viewer_screen.dart';
 import 'screens/notification_settings_screen.dart';
 import 'screens/privacy_settings_screen.dart';
 import 'screens/activity_feed_screen.dart';
+import 'screens/exp_center_screen.dart';
 import 'services/update_service.dart';
 import 'services/notification_service.dart';
 import 'utils/constants.dart';
@@ -82,12 +84,28 @@ class LiubiApp extends StatelessWidget {
         scrollBehavior: const _AppScrollBehavior(),
         title: '留笔',
         debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+          Locale('en'),
+        ],
+        locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
         theme: ThemeData(
           primaryColor: AppColors.primary,
           colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primary),
           scaffoldBackgroundColor: Colors.white,
           useMaterial3: true,
           fontFamily: null,
+          // 小红书风格文本选择配置
+          textSelectionTheme: const TextSelectionThemeData(
+            cursorColor: Color(0xFFFF2442),
+            selectionColor: Color(0x33FF2442),
+            selectionHandleColor: Color(0xFFFF2442),
+          ),
           textTheme: Typography.blackCupertino.copyWith(
             bodyLarge: const TextStyle(letterSpacing: 0, decorationColor: Colors.transparent),
             bodyMedium: const TextStyle(letterSpacing: 0, decorationColor: Colors.transparent),
@@ -209,6 +227,8 @@ class LiubiApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const PrivacySettingsScreen(), settings: settings);
             case '/activity-feed':
               return MaterialPageRoute(builder: (_) => const ActivityFeedScreen(), settings: settings);
+            case '/exp-center':
+              return MaterialPageRoute(builder: (_) => const ExpCenterScreen(), settings: settings);
             case '/follow-list':
               if (args is Map) {
                 final type = args['type'] as String? ?? 'follows';

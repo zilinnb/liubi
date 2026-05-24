@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/db')
-const { auth } = require('../middleware/auth')
+const { auth, adminAuth } = require('../middleware/auth')
 const { LEVEL_CONFIG, EXP_RULES, getLevelInfo } = require('./level-config')
 
 // 确保用户有留币和等级记录
@@ -10,13 +10,33 @@ async function ensureUserRecords(userId) {
 	await db.query('INSERT IGNORE INTO user_levels (user_id) VALUES (?)', [userId])
 }
 
+// 从数据库获取等级配置（缓存60秒）
+let _levelConfigCache = null
+let _levelConfigTime = 0
+async function getDbLevelConfig() {
+	const now = Date.now()
+	if (_levelConfigCache && now - _levelConfigTime < 60000) return _levelConfigCache
+	try {
+		const [rows] = await db.query('SELECT level, title, exp, exp_to_next FROM level_config ORDER BY level')
+		if (rows.length > 0) {
+			_levelConfigCache = rows
+			_levelConfigTime = now
+			return rows
+		}
+	} catch (_) {}
+	return LEVEL_CONFIG
+}
+
 // 添加经验值
-async function addExp(userId, amount) {
+async function addExp(userId, amount, type = 7, desc = '管理员调整') {
 	await ensureUserRecords(userId)
 	await db.query('UPDATE user_levels SET exp = exp + ?, total_exp = total_exp + ? WHERE user_id = ?', [amount, amount, userId])
+	// 记录经验变动
+	await db.query('INSERT INTO exp_records (user_id, amount, type, `desc`) VALUES (?, ?, ?, ?)', [userId, amount, type, desc])
 	// 检查升级
 	const [rows] = await db.query('SELECT exp FROM user_levels WHERE user_id = ?', [userId])
-	const info = getLevelInfo(rows[0].exp)
+	const config = await getDbLevelConfig()
+	const info = getLevelInfo(rows[0].exp, config)
 	await db.query('UPDATE user_levels SET level = ? WHERE user_id = ?', [info.level, userId])
 	return info
 }
@@ -29,9 +49,9 @@ router.get('/balance', auth, async (req, res) => {
 		await ensureUserRecords(req.user.id)
 		const [rows] = await db.query('SELECT balance, total_earned, total_spent, checkin_days, last_checkin FROM user_coins WHERE user_id = ?', [req.user.id])
 		const data = { ...rows[0] }
-		if (data.last_checkin instanceof Date) {
-			const d = new Date(data.last_checkin.getTime() + 8 * 3600000)
-			data.last_checkin = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
+		// dateStrings:true 已返回北京时间字符串，直接取日期部分
+		if (data.last_checkin) {
+			data.last_checkin = String(data.last_checkin).slice(0, 10)
 		}
 		res.json({ code: 200, data })
 	} catch (e) {
@@ -72,7 +92,7 @@ router.post('/checkin', auth, async (req, res) => {
 		await db.query('INSERT INTO coin_transactions (user_id, type, amount, description) VALUES (?, 1, ?, ?)',
 			[req.user.id, reward, `每日签到(连续${newDays}天)`])
 		// 签到获得经验
-		await addExp(req.user.id, EXP_RULES.checkin)
+		await addExp(req.user.id, EXP_RULES.checkin, 5, '每日签到')
 		res.json({ code: 200, data: { reward, days: newDays } })
 	} catch (e) {
 		res.json({ code: 500, msg: '签到失败' })
@@ -249,7 +269,8 @@ router.get('/level', auth, async (req, res) => {
 	try {
 		await ensureUserRecords(req.user.id)
 		const [rows] = await db.query('SELECT level, exp, total_exp FROM user_levels WHERE user_id = ?', [req.user.id])
-		const info = getLevelInfo(rows[0].exp)
+		const config = await getDbLevelConfig()
+		const info = getLevelInfo(rows[0].exp, config)
 		res.json({ code: 200, data: { ...rows[0], ...info } })
 	} catch (e) {
 		res.json({ code: 500, msg: '获取失败' })
@@ -261,7 +282,8 @@ router.get('/level/:userId', async (req, res) => {
 	try {
 		await ensureUserRecords(req.params.userId)
 		const [rows] = await db.query('SELECT level, exp, total_exp FROM user_levels WHERE user_id = ?', [req.params.userId])
-		const info = getLevelInfo(rows[0].exp)
+		const config = await getDbLevelConfig()
+		const info = getLevelInfo(rows[0].exp, config)
 		res.json({ code: 200, data: { ...rows[0], ...info } })
 	} catch (e) {
 		res.json({ code: 500, msg: '获取失败' })
@@ -271,6 +293,52 @@ router.get('/level/:userId', async (req, res) => {
 // 获取等级配置表
 router.get('/level-config', (req, res) => {
 	res.json({ code: 200, data: LEVEL_CONFIG })
+})
+
+// ═══════════════ 经验记录与任务 ═══════════════
+
+// 获取当前用户经验记录（分页）
+router.get('/exp-records', auth, async (req, res) => {
+	try {
+		const page = parseInt(req.query.page) || 1
+		const pageSize = parseInt(req.query.pageSize) || 20
+		const offset = (page - 1) * pageSize
+		const [countRows] = await db.query('SELECT COUNT(*) as total FROM exp_records WHERE user_id = ?', [req.user.id])
+		const [rows] = await db.query(
+			'SELECT id, amount, type, `desc`, created_at FROM exp_records WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+			[req.user.id, pageSize, offset]
+		)
+		res.json({ code: 200, data: { list: rows, total: countRows[0].total } })
+	} catch (e) {
+		res.json({ code: 500, msg: '获取失败' })
+	}
+})
+
+// 获取当前用户今日任务完成情况
+router.get('/exp-tasks', auth, async (req, res) => {
+	try {
+		const [configs] = await db.query('SELECT type, name, exp, daily_limit, is_active FROM exp_task_config ORDER BY type')
+		const results = []
+		for (const cfg of configs) {
+			const [countRows] = await db.query(
+				'SELECT COUNT(*) as count FROM exp_records WHERE user_id = ? AND type = ? AND created_at > CURDATE()',
+				[req.user.id, cfg.type]
+			)
+			const done = countRows[0].count
+			results.push({
+				type: cfg.type,
+				name: cfg.name,
+				exp: cfg.exp,
+				daily_limit: cfg.daily_limit,
+				is_active: cfg.is_active,
+				done,
+				finished: cfg.daily_limit > 0 ? done >= cfg.daily_limit : false
+			})
+		}
+		res.json({ code: 200, data: results })
+	} catch (e) {
+		res.json({ code: 500, msg: '获取失败' })
+	}
 })
 
 // ═══════════════ 管理员接口 ═══════════════
@@ -357,6 +425,77 @@ router.put('/config', auth, async (req, res) => {
 		await db.query('UPDATE coin_config SET `value` = ? WHERE `key` = ?', [String(value), key])
 		res.json({ code: 200, msg: '更新成功' })
 	} catch (e) {
+		res.json({ code: 500, msg: '更新失败' })
+	}
+})
+
+// 管理员获取任务配置列表
+router.get('/admin/exp-task-config', adminAuth, async (req, res) => {
+	try {
+		const [rows] = await db.query('SELECT type, name, exp, daily_limit, is_active, updated_at FROM exp_task_config ORDER BY type')
+		res.json({ code: 200, data: rows })
+	} catch (e) {
+		res.json({ code: 500, msg: '获取失败' })
+	}
+})
+
+// 管理员更新任务配置
+router.put('/admin/exp-task-config/:type', adminAuth, async (req, res) => {
+	try {
+		const { type } = req.params
+		const { exp, daily_limit, is_active } = req.body
+		const updates = []
+		const params = []
+		if (exp !== undefined) { updates.push('exp = ?'); params.push(exp) }
+		if (daily_limit !== undefined) { updates.push('daily_limit = ?'); params.push(daily_limit) }
+		if (is_active !== undefined) { updates.push('is_active = ?'); params.push(is_active) }
+		if (updates.length === 0) return res.json({ code: 400, msg: '参数错误' })
+		params.push(type)
+		await db.query(`UPDATE exp_task_config SET ${updates.join(', ')} WHERE type = ?`, params)
+		res.json({ code: 200, msg: '更新成功' })
+	} catch (e) {
+		res.json({ code: 500, msg: '更新失败' })
+	}
+})
+
+// 管理员获取等级配置列表
+router.get('/admin/level-config', adminAuth, async (req, res) => {
+	try {
+		const [rows] = await db.query('SELECT level, title, exp, exp_to_next, updated_at FROM level_config ORDER BY level')
+		if (rows.length === 0) {
+			// 表为空则返回默认值
+			return res.json({ code: 200, data: LEVEL_CONFIG })
+		}
+		res.json({ code: 200, data: rows })
+	} catch (e) {
+		res.json({ code: 500, msg: '获取失败' })
+	}
+})
+
+// 管理员更新等级配置（修改exp_to_next时自动重算所有exp累计值）
+router.put('/admin/level-config/:level', adminAuth, async (req, res) => {
+	try {
+		const { level } = req.params
+		const { title, exp_to_next } = req.body
+		const updates = []
+		const params = []
+		if (title !== undefined) { updates.push('title = ?'); params.push(title) }
+		if (exp_to_next !== undefined) { updates.push('exp_to_next = ?'); params.push(Number(exp_to_next)) }
+		if (updates.length === 0) return res.json({ code: 400, msg: '参数错误' })
+		params.push(level)
+		await db.query(`UPDATE level_config SET ${updates.join(', ')} WHERE level = ?`, params)
+
+		// 重新计算所有等级的累计经验阈值
+		const [allLevels] = await db.query('SELECT level, exp_to_next FROM level_config ORDER BY level')
+		let cumulative = 0
+		for (const lv of allLevels) {
+			await db.query('UPDATE level_config SET exp = ? WHERE level = ?', [cumulative, lv.level])
+			cumulative += Number(lv.exp_to_next) || 0
+		}
+
+		res.json({ code: 200, msg: '更新成功' })
+	} catch (e) {
+		console.error(e)
 		res.json({ code: 500, msg: '更新失败' })
 	}
 })

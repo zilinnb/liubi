@@ -368,7 +368,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       final tempDir = await getTemporaryDirectory();
       final file = File('${tempDir.path}/liubi_${DateTime.now().millisecondsSinceEpoch}.jpg');
       await file.writeAsBytes(response.data);
-      await Gal.putImage(file.path, album: '留笔');
+      await Gal.putImage(file.path, album: 'liubi');
       await file.delete();
       if (mounted) {
         Navigator.pop(context);
@@ -397,7 +397,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       if (mounted) {
         Navigator.pop(context);
         // 使用系统分享，支持微信/QQ等
-        await Share.shareXFiles([XFile(file.path)], text: '来自留笔');
+        await Share.shareXFiles([XFile(file.path)], text: '来自liubi');
         // 分享完成后删除临时文件
         if (await file.exists()) await file.delete();
       }

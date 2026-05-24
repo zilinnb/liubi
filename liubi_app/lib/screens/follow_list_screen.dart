@@ -17,11 +17,57 @@ class FollowListScreen extends StatefulWidget {
 class _FollowListScreenState extends State<FollowListScreen> {
   List<Map<String, dynamic>> _users = [];
   bool _loading = true;
+  int _page = 1;
+  bool _noMore = false;
+  bool _loadingMore = false;
+  final ScrollController _scrollCtrl = ScrollController();
+  static const int _pageSize = 20;
 
   @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScroll);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_loadingMore || _noMore || !_scrollCtrl.hasClients) return;
+    final maxScroll = _scrollCtrl.position.maxScrollExtent;
+    final currentScroll = _scrollCtrl.position.pixels;
+    if (maxScroll - currentScroll <= 300) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _noMore) return;
+    setState(() => _loadingMore = true);
+    _page++;
+    try {
+      final res = await ApiService().get('/users/${widget.userId}/${widget.type}', queryParameters: {'page': _page, 'pageSize': _pageSize});
+      if (res['code'] == 200 && mounted) {
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final total = data['total'] as int? ?? 0;
+        setState(() {
+          _users.addAll(list);
+          _noMore = _users.length >= total;
+          _loadingMore = false;
+        });
+      } else {
+        _page--;
+        setState(() => _loadingMore = false);
+      }
+    } catch (_) {
+      _page--;
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 
   String get _title {
@@ -34,11 +80,16 @@ class _FollowListScreenState extends State<FollowListScreen> {
   }
 
   Future<void> _loadData() async {
+    setState(() { _page = 1; _noMore = false; _loading = true; });
     try {
-      final res = await ApiService().get('/users/${widget.userId}/${widget.type}');
+      final res = await ApiService().get('/users/${widget.userId}/${widget.type}', queryParameters: {'page': 1, 'pageSize': _pageSize});
       if (res['code'] == 200 && mounted) {
+        final data = res['data'] as Map<String, dynamic>? ?? {};
+        final list = (data['list'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final total = data['total'] as int? ?? 0;
         setState(() {
-          _users = (res['data'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          _users = list;
+          _noMore = _users.length >= total;
           _loading = false;
         });
       }
@@ -75,6 +126,7 @@ class _FollowListScreenState extends State<FollowListScreen> {
                 : _users.isEmpty
                     ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.people_outline, size: 48, color: const Color(0xFFDDDDDD)), const SizedBox(height: 12), const Text('暂无数据', style: TextStyle(fontSize: 14, color: Color(0xFF999999)))]))
                     : CustomScrollView(
+                        controller: _scrollCtrl,
                         slivers: [
                           CupertinoSliverRefreshControl(onRefresh: _loadData),
                           SliverList(
@@ -83,6 +135,10 @@ class _FollowListScreenState extends State<FollowListScreen> {
                               childCount: _users.length,
                             ),
                           ),
+                          if (_loadingMore)
+                            const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CupertinoActivityIndicator(radius: 10, color: Color(0xFFFF2442))))),
+                          if (_noMore && _users.isNotEmpty)
+                            const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('没有更多了', style: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)))))),
                         ],
                       ),
           ),

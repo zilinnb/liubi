@@ -136,6 +136,7 @@ class _CategoryScreenState extends State<CategoryScreen> with TickerProviderStat
         'page': _pages[sortIdx],
         'pageSize': 20,
         'sort': sortValues[sortIdx],
+        'include_pinned': '1',
       });
       if (res['code'] == 200 && mounted) {
         final data = res['data'] as Map<String, dynamic>;

@@ -14,6 +14,7 @@ const routes = [
       { path: 'categories', component: () => import('../views/Categories.vue'), meta: { title: '分类管理', icon: 'Menu' } },
       { path: 'conversations', component: () => import('../views/Conversations.vue'), meta: { title: '会话管理', icon: 'ChatDotRound' } },
       { path: 'coins', component: () => import('../views/Coins.vue'), meta: { title: '留币管理', icon: 'Coin' } },
+      { path: 'level-config', component: () => import('../views/LevelConfig.vue'), meta: { title: '等级配置', icon: 'Trophy' } },
       { path: 'ai-config', component: () => import('../views/AIConfig.vue'), meta: { title: 'AI配置', icon: 'MagicStick' } },
       { path: 'version', component: () => import('../views/Version.vue'), meta: { title: '版本管理', icon: 'Upload' } },
       { path: 'system', component: () => import('../views/System.vue'), meta: { title: '系统设置', icon: 'Setting' } },

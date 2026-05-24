@@ -26,7 +26,8 @@ String fmtTime(String? dateStr) {
   if (diff.inSeconds < 5) return '刚刚';
   if (diff.inSeconds < 60) return '${diff.inSeconds}秒前';
   if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-  if (diff.inHours < 24) return '${diff.inHours}小时前';
+  if (diff.inHours < 24 && date.day == now.day) return '${diff.inHours}小时前';
+  if (diff.inDays < 1) return '昨天';
   if (diff.inDays < 30) return '${diff.inDays}天前';
   if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
   if (diff.inDays < 730) return '${(diff.inDays / 365).floor()}年前';

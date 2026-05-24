@@ -43,6 +43,10 @@
           <el-icon><Coin /></el-icon>
           <template #title>留币管理</template>
         </el-menu-item>
+        <el-menu-item index="/admin/level-config">
+          <el-icon><Trophy /></el-icon>
+          <template #title>等级配置</template>
+        </el-menu-item>
         <el-menu-item index="/admin/ai-config">
           <el-icon><MagicStick /></el-icon>
           <template #title>AI配置</template>

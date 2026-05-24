@@ -49,14 +49,14 @@ router.get('/', async (req, res) => {
 		const { category_id, page = 1, pageSize = 20, user_id, following, sort } = req.query
 		const offset = (page - 1) * pageSize
 
-		// 非个性化请求才缓存（无following、无user_id）
-		const canCache = !following && !user_id
+		// 非个性化请求才缓存（无following、无user_id），recommend排序不缓存（含随机因子）
+		const canCache = !following && !user_id && sort !== 'recommend'
 		const cacheKey = canCache ? `posts:list:${category_id || 'all'}:${page}:${pageSize}:${sort || 'latest'}` : null
 		if (cacheKey) {
 			const cached = await redis.get(cacheKey)
 			if (cached) return res.json({ code: 200, data: cached })
 		}
-		let where = 'WHERE p.status = 1'
+		let where = 'WHERE p.status = 1 AND (p.is_pinned = 0 OR p.is_pinned IS NULL)'
 		const params = []
 
 		if (category_id) { where += ' AND p.category_id = ?'; params.push(category_id) }
@@ -102,7 +102,7 @@ router.get('/', async (req, res) => {
 		const orderMap = {
 			latest: 'p.created_at DESC',
 			hot: '(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) DESC, p.created_at DESC',
-			recommend: `(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) / POW(1 + TIMESTAMPDIFF(HOUR, p.created_at, NOW()) / 12.0, 1.5) DESC, p.created_at DESC`,
+			recommend: `(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) / POW(1 + TIMESTAMPDIFF(HOUR, p.created_at, NOW()) / 12.0, 1.5) * (0.6 + RAND() * 0.8) DESC, p.created_at DESC`,
 			random: 'RAND()',
 		}
 		const orderBy = orderMap[sort] || orderMap.latest
@@ -244,15 +244,16 @@ router.get('/search', async (req, res) => {
 // 热门榜单 - 缓存120秒
 router.get('/trending', async (req, res) => {
 	try {
-		const { type = 'hot', limit = 30 } = req.query
-		const limitNum = Math.min(Number(limit) || 30, 100)
+		const { type = 'hot' } = req.query
+		const page = Math.max(1, parseInt(req.query.page) || 1)
+		const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20))
+		const offset = (page - 1) * pageSize
 
-		const cacheKey = `posts:trending:${type}:${limitNum}`
-		const cached = await redis.get(cacheKey)
-		if (cached) return res.json({ code: 200, data: cached })
-
-		let rows
+		let rows, totalRow
 		if (type === 'hot') {
+			// 百度贴吧算法：时间衰减+互动热度
+			const [[t]] = await db.query(`SELECT COUNT(*) as total FROM posts p WHERE p.status = 1 AND (p.is_private = 0 OR p.is_private IS NULL) AND p.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)`)
+			totalRow = t.total
 			const [r] = await db.query(
 				`SELECT p.id, p.title, p.content, p.post_type, p.voice_url, p.voice_duration, p.text_template,
 					p.views_count, p.likes_count, p.collects_count, p.comments_count,
@@ -261,12 +262,14 @@ router.get('/trending', async (req, res) => {
 				LEFT JOIN users u ON p.user_id = u.id
 				LEFT JOIN categories c ON p.category_id = c.id
 				WHERE p.status = 1 AND (p.is_private = 0 OR p.is_private IS NULL) AND p.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)
-				ORDER BY (p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) DESC
-				LIMIT ?`,
-				[limitNum]
+				ORDER BY (p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) / POW(1 + TIMESTAMPDIFF(HOUR, p.created_at, NOW()) / 12.0, 1.5) * (0.6 + RAND() * 0.8) DESC
+				LIMIT ? OFFSET ?`,
+				[pageSize, offset]
 			)
 			rows = r
 		} else if (type === 'latest') {
+			const [[t]] = await db.query(`SELECT COUNT(*) as total FROM posts p WHERE p.status = 1 AND (p.is_private = 0 OR p.is_private IS NULL)`)
+			totalRow = t.total
 			const [r] = await db.query(
 				`SELECT p.id, p.title, p.content, p.post_type, p.voice_url, p.voice_duration, p.text_template,
 					p.views_count, p.likes_count, p.collects_count, p.comments_count,
@@ -275,8 +278,8 @@ router.get('/trending', async (req, res) => {
 				LEFT JOIN users u ON p.user_id = u.id
 				LEFT JOIN categories c ON p.category_id = c.id
 				WHERE p.status = 1 AND (p.is_private = 0 OR p.is_private IS NULL)
-				ORDER BY p.created_at DESC LIMIT ?`,
-				[limitNum]
+				ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
+				[pageSize, offset]
 			)
 			rows = r
 		} else {
@@ -303,8 +306,8 @@ router.get('/trending', async (req, res) => {
 			rows.forEach(r => { r.level_info = levelMap[r.user_id] || null })
 		}
 
-		await redis.set(cacheKey, rows, 120)
-		res.json({ code: 200, data: rows })
+		const result = { list: rows, total: totalRow, page, pageSize }
+		res.json({ code: 200, data: result })
 	} catch (e) {
 		console.error(e)
 		res.json({ code: 500, msg: '服务器错误' })
@@ -470,7 +473,7 @@ router.post('/', auth, async (req, res) => {
 		await db.query('UPDATE users SET location = ? WHERE id = ?', [location, req.user.id])
 
 		res.json({ code: 200, msg: '发布成功', data: { id: result.insertId } })
-		addExp(req.user.id, EXP_RULES.post).catch(() => {})
+		addExp(req.user.id, EXP_RULES.post, 1, '发布笔记').catch(() => {})
 		redis.del('posts:list:*').catch(() => {})
 		redis.del('categories:all').catch(() => {})
 	} catch (e) {
