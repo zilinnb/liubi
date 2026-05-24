@@ -102,6 +102,7 @@ router.get('/', async (req, res) => {
 		const orderMap = {
 			latest: 'p.created_at DESC',
 			hot: '(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) DESC, p.created_at DESC',
+			recommend: `(p.views_count * 1 + p.likes_count * 5 + p.collects_count * 3 + p.comments_count * 2) / POW(1 + TIMESTAMPDIFF(HOUR, p.created_at, NOW()) / 12.0, 1.5) DESC, p.created_at DESC`,
 			random: 'RAND()',
 		}
 		const orderBy = orderMap[sort] || orderMap.latest

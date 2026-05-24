@@ -2083,12 +2083,15 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
         child: Stack(children: [
           ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 200), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: 140, fit: BoxFit.cover))),
           if (img.isLive) Positioned(bottom: 4, left: 4, child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(3),
+            ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+              Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10),
               const SizedBox(width: 2),
-              const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+              const Text('LIVE', style: TextStyle(fontSize: 8, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
             ]),
           )),
         ]),
@@ -2110,12 +2113,15 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
               child: Stack(children: [
                 ClipRRect(borderRadius: BorderRadius.circular(6), child: CachedNetworkImage(imageUrl: fullUrl(img.url), width: 80, height: 80, fit: BoxFit.cover)),
                 if (img.isLive) Positioned(bottom: 3, left: 3, child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
-                    const SizedBox(width: 2),
-                    const Text('LIVE', style: TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                    Image.asset('assets/icons/icon_live_photo.png', width: 8, height: 8),
+                    const SizedBox(width: 1),
+                    const Text('LIVE', style: TextStyle(fontSize: 7, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.3)),
                   ]),
                 )),
               ]),
@@ -2590,12 +2596,15 @@ class _DetailScreenState extends State<DetailScreen> with TickerProviderStateMix
                       ClipRRect(borderRadius: BorderRadius.circular(8), child: CachedNetworkImage(imageUrl: fullUrl(_commentImages[i]), width: 72, height: 72, fit: BoxFit.cover)),
                       if (_commentImageDetails.length > i && _commentImageDetails[i]['media_type'] == 2)
                         Positioned(bottom: 4, left: 4, child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-                          decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
-                            const SizedBox(width: 2),
-                            const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                            Image.asset('assets/icons/icon_live_photo.png', width: 8, height: 8),
+                            const SizedBox(width: 1),
+                            const Text('LIVE', style: TextStyle(fontSize: 7, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.3)),
                           ]),
                         )),
                       Positioned(top: -6, right: -6, child: GestureDetector(

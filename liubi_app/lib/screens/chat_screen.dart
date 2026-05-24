@@ -1023,14 +1023,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin, 
                   CachedNetworkImage(imageUrl: imgUrl, fit: BoxFit.cover)
                 else
                   Container(width: 180, height: 180 * 0.75, color: const Color(0xFFF0F0F0)),
-                // LIVE标识
+                // LIVE标识 - 左下角
                 Positioned(bottom: 6, left: 6, child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                    Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10),
                     const SizedBox(width: 2),
-                    const Text('LIVE', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                    const Text('LIVE', style: TextStyle(fontSize: 8, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                   ]),
                 )),
                 if (isUploading)

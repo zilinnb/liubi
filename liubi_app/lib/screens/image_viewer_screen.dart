@@ -53,6 +53,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   SystemUiOverlayStyle? _previousStyle;
   VideoPlayerController? _videoCtrl;
   bool _isLivePlaying = false;
+  bool _isLiveLoading = false;
 
   bool _isLivePhoto(int index) {
     if (index >= widget.liveVideoUrls.length) return false;
@@ -67,23 +68,26 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   void _startLiveVideo() {
     final url = _liveVideoUrl(_current);
-    if (url == null) return;
+    if (url == null || _isLiveLoading) return;
     final full = url.startsWith('http') ? url : fullUrl(url);
     _videoCtrl?.dispose();
+    setState(() { _isLiveLoading = true; });
     _videoCtrl = VideoPlayerController.networkUrl(Uri.parse(full));
     _videoCtrl!.initialize().then((_) {
       if (mounted) {
         _videoCtrl!.setLooping(true);
         _videoCtrl!.play();
-        setState(() { _isLivePlaying = true; });
+        setState(() { _isLivePlaying = true; _isLiveLoading = false; });
       }
-    }).catchError((_) {});
+    }).catchError((_) {
+      if (mounted) setState(() { _isLiveLoading = false; });
+    });
   }
 
   void _stopLiveVideo() {
     _videoCtrl?.dispose();
     _videoCtrl = null;
-    if (mounted) setState(() { _isLivePlaying = false; });
+    if (mounted) setState(() { _isLivePlaying = false; _isLiveLoading = false; });
   }
 
   @override
@@ -141,6 +145,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             pageController: _ctrl,
             onPageChanged: (i) {
               _stopLiveVideo();
+              _isLiveLoading = false;
               setState(() => _current = i);
             },
             loadingBuilder: (_, __) => const Center(
@@ -166,50 +171,64 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             ),
           ),
 
-        // LIVE标识和播放按钮
-        if (isLive && !_isLivePlaying)
+        // LIVE标识 - 左下角，点击实况播放
+        if (isLive && !_isLivePlaying && !_isLiveLoading)
           Positioned(
-            bottom: MediaQuery.of(context).padding.bottom + 80,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: _startLiveVideo,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Image.asset('assets/icons/icon_live_photo.png', width: 16, height: 16, color: Colors.white),
-                    const SizedBox(width: 4),
-                    const Text('LIVE', style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.play_arrow, size: 16, color: Colors.white),
-                  ]),
+            bottom: MediaQuery.of(context).padding.bottom + 24,
+            left: 16,
+            child: GestureDetector(
+              onTap: _startLiveVideo,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(4),
                 ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Image.asset('assets/icons/icon_live_photo.png', width: 14, height: 14),
+                  const SizedBox(width: 3),
+                  const Text('LIVE', style: TextStyle(fontSize: 10, color: Color(0xFF333333), fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                ]),
               ),
             ),
           ),
 
-        // 播放中提示
+        // 加载中标识 - 左下角，橙色背景+转圈
+        if (isLive && _isLiveLoading)
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 24,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF9800).withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox(width: 14, height: 14, child: const CupertinoActivityIndicator(radius: 5, color: Colors.white)),
+                const SizedBox(width: 3),
+                const Text('LIVE', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              ]),
+            ),
+          ),
+
+        // 播放中标识 - 左下角，点击停止
         if (_isLivePlaying)
           Positioned(
-            top: statusBarH + 56,
-            left: 0,
-            right: 0,
-            child: Center(
+            bottom: MediaQuery.of(context).padding.bottom + 24,
+            left: 16,
+            child: GestureDetector(
+              onTap: _stopLiveVideo,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
+                  color: const Color(0xFFFF2442).withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Image.asset('assets/icons/icon_live_photo.png', width: 10, height: 10, color: Colors.white),
+                  Image.asset('assets/icons/icon_live_photo.png', width: 14, height: 14, color: Colors.white),
                   const SizedBox(width: 3),
-                  const Text('实况播放中', style: TextStyle(fontSize: 11, color: Colors.white)),
+                  const Text('LIVE', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 ]),
               ),
             ),

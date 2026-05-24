@@ -38,7 +38,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (!mounted || _dataLoaded) return;
     _dataLoaded = true;
     final pp = Provider.of<PostProvider>(context, listen: false);
-    pp.fetchPosts(refresh: true);
+    pp.fetchPosts(refresh: true, sort: 'recommend');
     pp.fetchCategories();
   }
 
@@ -147,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (tabIdx == 0) {
       if (pp.followingPosts.isEmpty && !pp.followingLoading) pp.fetchPosts(refresh: true, following: true);
     } else if (tabIdx == 1) {
-      if (pp.posts.isEmpty && !pp.loading) pp.fetchPosts(refresh: true);
+      if (pp.posts.isEmpty && !pp.loading) pp.fetchPosts(refresh: true, sort: 'recommend');
     } else {
       final catIdx = tabIdx - 2;
       if (catIdx < pp.categories.length) {
@@ -197,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (tabIdx == 0) {
       if (!pp.followingNoMore && !pp.followingLoading) pp.fetchPosts(following: true);
     } else if (tabIdx == 1) {
-      if (!pp.noMore && !pp.loading) pp.fetchPosts();
+      if (!pp.noMore && !pp.loading) pp.fetchPosts(sort: 'recommend');
     } else {
       final catIdx = tabIdx - 2;
       if (catIdx < pp.categories.length) {
@@ -222,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (currentTab == 0) {
       pp.fetchPosts(refresh: true, following: true);
     } else if (currentTab == 1) {
-      pp.fetchPosts(refresh: true);
+      pp.fetchPosts(refresh: true, sort: 'recommend');
     } else {
       final catIdx = currentTab - 2;
       if (catIdx < pp.categories.length) {
@@ -511,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return CustomScrollView(
       controller: _scrollCtrls[1],
       slivers: [
-        CupertinoSliverRefreshControl(onRefresh: () async => pp.fetchPosts(refresh: true)),
+        CupertinoSliverRefreshControl(onRefresh: () async => pp.fetchPosts(refresh: true, sort: 'recommend')),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
           sliver: SliverMasonryGrid.count(
